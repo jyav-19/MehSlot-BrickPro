@@ -282,6 +282,7 @@ pub fn fade_from(out: &mut [Draw], from: usize, alpha: f32) {
         match d {
             Draw::Rect { colour, .. } => colour[3] *= alpha,
             Draw::Tex { alpha: a, .. } | Draw::Turned { alpha: a, .. } => *a *= alpha,
+            Draw::Model { colour, .. } => colour[3] *= alpha,
             Draw::Game | Draw::Shot { .. } => {}
         }
     }

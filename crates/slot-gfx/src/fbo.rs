@@ -1,4 +1,4 @@
-use crate::draw::{Draw, Sprites, TexId};
+use crate::draw::{Draw, MeshId, MeshVertex, Sprites, TexId};
 use crate::grade::blue_light_gain;
 use crate::pipeline::GamePass;
 use crate::quad::Quad;
@@ -138,6 +138,11 @@ impl Compositor {
 
     pub fn update_texture(&mut self, id: TexId, w: u32, h: u32, rgba: &[u8]) {
         self.sprites.update_texture(id, w, h, rgba);
+    }
+
+    /// Hands a model's triangles, three corners each, to the GPU, once.
+    pub fn create_mesh(&mut self, vertices: &[MeshVertex]) -> MeshId {
+        self.sprites.create_mesh(vertices)
     }
 
     pub fn set_blue_light(&mut self, step: u8) {

@@ -110,3 +110,4 @@ pub use toast::{toast_box, toast_face, toast_rect, Toast};
 
 #[cfg(feature = "brick")]
 pub use slot_chrome::{upload_slot_art,slot_art_face};
+pub mod cart_mesh;
