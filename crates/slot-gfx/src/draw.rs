@@ -45,7 +45,8 @@ pub struct MeshVertex {
 /// point `MODEL_LIGHT` canvas pixels from a model's middle, up, to the left and in front of it,
 /// with `MODEL_AMBIENT` of it falling on every side alike. (These are omega-zero's values, so
 /// the look matches it; they are the knobs to turn for a smoother one.)
-const MODEL_SNAP: f32 = 2.0;
+// omega-zero's value is 2.0, a PlayStation-style grid that makes a turning model shimmer.
+const MODEL_SNAP: f32 = 0.125;
 const MODEL_DITHER: f32 = 2.0;
 const MODEL_LIGHT: [f32; 3] = [-700.0, -500.0, -900.0];
 const MODEL_AMBIENT: f32 = 0.68;

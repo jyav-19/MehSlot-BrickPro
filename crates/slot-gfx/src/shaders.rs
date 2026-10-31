@@ -248,7 +248,8 @@ void main() {
     vec2 q = mod(p, 2.0);
     vec2 r = floor(p * 0.5);
     float b = 4.0 * mod(2.0 * q.x + 3.0 * q.y, 4.0) + mod(2.0 * r.x + 3.0 * r.y, 4.0);
-    c.rgb = floor(clamp(c.rgb, 0.0, 1.0) * 31.0 + (b + 0.5) / 16.0) / 31.0;
+    // omega-zero cuts to 15 bits here (31.0); 255.0 keeps full colour, so the dither cannot be seen.
+    c.rgb = floor(clamp(c.rgb, 0.0, 1.0) * 255.0 + (b + 0.5) / 16.0) / 255.0;
     FRAG_COLOR = c;
 }
 "#;

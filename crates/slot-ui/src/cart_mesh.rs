@@ -17,7 +17,8 @@ pub const THICK: f32 = 0.14;
 /// The face is laid over this many cells across and down: textures are mapped without
 /// perspective, so a face in one piece would bend its label along the diagonal as it turns, the
 /// way big polygons did on the PlayStation. A few cells keep a little of that.
-const FACE_CELLS: (usize, usize) = (4, 3);
+// omega-zero uses (4, 3), which bends a label as the cart turns; more cells keep it straight.
+const FACE_CELLS: (usize, usize) = (16, 12);
 
 /// How far in from the outline, in drawing units, a side takes its colour from the face.
 const SIDE_SAMPLE: f32 = 9.0;
