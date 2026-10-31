@@ -46,7 +46,7 @@ A port of [Slot.](https://github.com/BrandonKowalski/slot), originally developed
 | **RetroAchievements** | Log in from the menu and earn achievements in softcore mode. |
 | **Overlays** | Frames for GB, GBC, GBA, NES and SNES games, by KrutzOtrem, or your own 1024×768 ones; the game fits itself into the overlay's window. |
 | **Brick and Brick Hammer integration** | Screen and control support, plus LED power, brightness, colour, and effects. |
-| **Brick Pro** | Recognised by itself: the left stick works as the D-pad, and its stick lights have their own LEDs setting. On Slot OS it has an image of its own (experimental, not yet tried on a Brick Pro). |
+| **Brick Pro** | Recognised by itself: the left stick works as the D-pad, and its stick lights have their own LEDs setting. On Slot OS it has an image of its own (experimental: tried by one player, with the buttons, left stick, LEDs and sleep working). |
 | **Sleep support** | Deep sleep with low battery drain. Auto-sleep after 5 minutes idle in menus or 15 minutes in game. |
 | **Low battery warning** | F1/F2 stay red at 15% or below and blink rapidly at 10% or below (500 ms cycle), even with decorative LEDs off. Charging restores your lights; at 5%, Slot saves and shuts down (3%, 5%, 10% or off under System → Low Battery Shutdown). |
 | **Adaptive performance** | Adaptive CPU clocks for smooth audio. |
@@ -81,7 +81,7 @@ Copy any important files from your existing SD card to your computer.
 
 #### 2. Download the latest release
 
-Download `slot-brick-<version>-sd-card.zip` from the [Releases](../../releases) page and extract it on your computer.
+Download `slot-stock-<version>.zip` from the [Releases](../../releases) page and extract it on your computer.
 
 #### 3. Format the SD card
 
@@ -126,10 +126,10 @@ Flashing the image erases **the whole card**. Copy everything on it to your comp
 
 #### 2. Download the image
 
-Download `slot-os-<version>-sd-card.img.xz` from the [Releases](../../releases) page. There is no need to extract it.
+Download `slot-os-brick-<version>.img.xz` from the [Releases](../../releases) page. There is no need to extract it.
 
 > [!IMPORTANT]
-> On a **Brick Pro**, download `slot-os-brickpro-<version>-sd-card.img.xz` instead: the Brick Pro is wired differently (screen, buttons, sticks) and needs its own. It is **experimental and has not been tried on a Brick Pro yet**. If you try it, please report how it went in [issue #65](../../issues/65), with the card's `Slot/Logs` folder. Nothing on the Brick Pro is changed: take the card out and it starts as before.
+> On a **Brick Pro**, download `slot-os-brickpro-<version>.img.xz` instead: the Brick Pro is wired differently (screen, buttons, sticks) and needs its own. It is **experimental**: one player has tried it so far, with the buttons, the left stick, the LEDs and sleep working. If you try it, please report how it went in [issue #65](../../issues/65), with the card's `Slot/Logs` folder. Nothing on the Brick Pro is changed: take the card out and it starts as before.
 
 #### 3. Flash it onto the card
 
@@ -157,7 +157,7 @@ The card now shows one drive in Windows, **SLOT**, with a `Slot` folder. From yo
 - The stock firmware apps (below) are not there; take the card out to use the stock OS.
 - **HOME → Online → Update** updates Slot OS itself as well as Slot. If an update does not start, the previous version is put back.
 - If the Brick loses power while running, the card is checked and repaired at the next start.
-- A Brick Pro needs its own image, `slot-os-brickpro-…` (experimental, not yet tried on a Brick Pro). Its left stick works as the D-pad, as on stock firmware.
+- A Brick Pro needs its own image, `slot-os-brickpro-…` (experimental). Its left stick works as the D-pad, as on stock firmware.
 
 #### Going back to stock firmware
 
@@ -369,16 +369,21 @@ Brick and Brick Hammer code is gated behind the `brick` Cargo feature.
 
 ### Making a release
 
-Pushing a `vX.Y` tag builds the card from that tag and publishes it as a release, with
-`update.txt` and `update.txt.sig` beside the zip: what **HOME → Online → Update** finds the release by.
+Pushing a `vX.Y` tag builds the card from that tag and publishes it as a release holding only
+what people download: `slot-stock-vX.Y.zip`, `slot-os-brick-vX.Y.img.xz` and
+`slot-os-brickpro-vX.Y.img.xz`. What **HOME → Online → Update** downloads goes to the
+[Updates](../../releases/tag/updates) release (`brick/updates-release.sh`): `update.txt` and
+`update.txt.sig`, naming the zip, and the zip itself.
 `update.txt` is signed with the release key, kept in the `UPDATE_SIGNING_KEY` repository
 secret (an Ed25519 private key, PEM); its public half is in `crates/slot/src/update.rs`, and
 Slot installs nothing it doesn't verify. Without the secret, a release refuses to build.
 The same release carries Slot OS, built from the same card (`brick/os/build.sh`, see
-[`brick/os/README.md`](brick/os/README.md)): `slot-os-vX.Y-sd-card.img.xz` to flash, and
-`slot-os-vX.Y-update.zip` with its own signed `update-os.txt`, which Slot OS's Update reads, and the
+[`brick/os/README.md`](brick/os/README.md)): `slot-os-brick-vX.Y.img.xz` to flash, and in
+Updates `slot-os-brick-vX.Y-update.zip` with its own signed `update-os.txt`, which Slot OS's Update reads, and the
 Brick Pro's the same as `slot-os-brickpro-…` with `update-os-brickpro.txt` (`SLOT_OS_MODEL=brickpro`, from TrimUI's Brick Pro firmware).
-Every merge to `main` does the same for the Dev build.
+Every merge to `main` does the same for the Dev build: `slot-stock-dev.zip` and the Slot OS images in
+the Dev build release, its update files in Updates as `dev-update.txt`, `dev-update-os.txt` and
+`dev-update-os-brickpro.txt`. Updates keeps every version's zips, so none is ever gone.
 Pushing a tag needs write access, so only maintainers can start one. Before tagging:
 
 1. Put the version at the top of [`brick/README.md`](brick/README.md) — it is what the card

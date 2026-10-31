@@ -22,7 +22,8 @@ enum Row {
 }
 
 struct Installing {
-    rx: mpsc::Receiver<Result<(), String>>,
+    /// `Some`: the channel has moved on since the check, so that newer one is shown instead.
+    rx: mpsc::Receiver<Result<Option<Manifest>, String>>,
     progress: Arc<Progress>,
     size: u64,
     /// The tenth of a MB last shown, so the screen is redrawn only when that changes.
@@ -49,16 +50,25 @@ pub struct UpdateScreen {
     /// screen last laid them out.
     scroll: usize,
     pub scroll_max: std::cell::Cell<usize>,
+    /// What the last check found for the footer's symbol to follow: the newer Slot, or None.
+    verdict: Option<Option<Manifest>>,
 }
 
 /// Lines L1 / R1 move the notes by.
 const SCROLL_STEP: usize = 3;
 
 impl UpdateScreen {
-    pub fn open(root: &Path) -> Self {
+    /// `known`: the newer Slot this boot's check found, shown straight away rather than asked
+    /// for again.
+    pub fn open(root: &Path, known: Option<Manifest>) -> Self {
         let channel = update::saved_channel(root);
         let mut s = Self::with(root, update::base(), Installed::current(), channel);
-        s.start_check();
+        match known.filter(|m| m.channel == channel) {
+            Some(m) => {
+                s.show(m);
+            }
+            None => s.start_check(),
+        }
         s
     }
 
@@ -80,6 +90,7 @@ impl UpdateScreen {
             restart: false,
             scroll: 0,
             scroll_max: std::cell::Cell::new(0),
+            verdict: None,
         }
     }
 
@@ -96,6 +107,11 @@ impl UpdateScreen {
 
     pub fn busy(&self) -> bool {
         self.check.is_some() || self.installing.is_some()
+    }
+
+    /// What the last check said about a newer Slot, once.
+    pub fn take_verdict(&mut self) -> Option<Option<Manifest>> {
+        self.verdict.take()
     }
 
     /// Swapped in: Slot should end, for launch.sh to start the new one.
@@ -142,12 +158,8 @@ impl UpdateScreen {
             self.check = None;
             match result {
                 Ok(m) => {
-                    let offer = update::offer(&self.installed, &m);
-                    self.status = self.found_line(&m, offer);
-                    self.found = Some((m, offer));
-                    if offer != Offer::UpToDate {
-                        self.row = 1;
-                    }
+                    let offer = self.show(m.clone());
+                    self.verdict = Some((offer == Offer::Newer).then_some(m));
                 }
                 Err(e) => self.status = e,
             }
@@ -155,7 +167,14 @@ impl UpdateScreen {
         }
         let Some(job) = &mut self.installing else { return false };
         match job.rx.try_recv() {
-            Ok(Ok(())) => {
+            Ok(Ok(Some(m))) => {
+                self.installing = None;
+                self.show(m.clone());
+                self.verdict = Some(Some(m));
+                self.status = "A newer update came out since. Install this one?".into();
+                true
+            }
+            Ok(Ok(None)) => {
                 self.installing = None;
                 self.status = "Installed. Restarting...".into();
                 self.restart = true;
@@ -185,6 +204,17 @@ impl UpdateScreen {
                 true
             }
         }
+    }
+
+    /// What a check found, on screen, with Install picked when there is something to install.
+    fn show(&mut self, m: Manifest) -> Offer {
+        let offer = update::offer(&self.installed, &m);
+        self.status = self.found_line(&m, offer);
+        self.found = Some((m, offer));
+        if offer != Offer::UpToDate {
+            self.row = 1;
+        }
+        offer
     }
 
     fn found_line(&self, m: &Manifest, offer: Offer) -> String {
@@ -303,7 +333,8 @@ impl UpdateScreen {
         let (base, m, card, shared) = (self.base.clone(), m.clone(), update::card_of(&self.root), progress.clone());
         let size = m.size;
         thread::spawn(move || {
-            let _ = tx.send(update::install(&base, &m, &card, &shared));
+            let latest = update::check(&base, m.channel);
+            let _ = tx.send(install_latest(&m, latest, || update::install(&base, &m, &card, &shared)));
         });
         self.installing = Some(Installing { rx, progress, size, shown: u64::MAX - 1 });
         self.status = format!("Downloading 0.0 of {}", mb(size));
@@ -361,6 +392,98 @@ impl UpdateScreen {
     }
 }
 
+/// How long the footer's update check waits before asking again.
+pub const RECHECK_MS: u64 = 30 * 60 * 1000;
+
+/// The footer's update symbol. The saved channel is asked for its latest update, as HOME →
+/// Update asks it, the first time Wi-Fi is up, then every half hour and each time a game is
+/// closed, never during a game. Nothing is downloaded but that; a check that fails waits for the
+/// next one.
+#[derive(Default)]
+pub struct AutoCheck {
+    /// When the next check may start, on the app's clock.
+    due: u64,
+    answer: Option<mpsc::Receiver<Result<Manifest, String>>>,
+    /// The newer Slot found, for HOME → Update to show without asking again.
+    newer: Option<Manifest>,
+}
+
+impl AutoCheck {
+    /// Starts a check when one is due and `allowed` (the setting is on, Wi-Fi is up, no game is
+    /// running), and takes its answer. True when the symbol is to come or go.
+    pub fn poll(&mut self, root: &Path, now: u64, allowed: bool) -> bool {
+        if allowed && self.answer.is_none() && now >= self.due {
+            let (base, channel) = (update::base(), update::saved_channel(root));
+            self.start(now, move || update::check(&base, channel));
+        }
+        let Some(rx) = &self.answer else { return false };
+        let got = match rx.try_recv() {
+            Ok(got) => got,
+            Err(mpsc::TryRecvError::Empty) => return false,
+            Err(mpsc::TryRecvError::Disconnected) => Err("The check stopped".into()),
+        };
+        self.answer = None;
+        self.found(got, &Installed::current())
+    }
+
+    /// A game was closed: check at the next chance.
+    pub fn soon(&mut self) {
+        self.due = 0;
+    }
+
+    fn start(&mut self, now: u64, check: impl FnOnce() -> Result<Manifest, String> + Send + 'static) {
+        self.due = now + RECHECK_MS;
+        let (tx, rx) = mpsc::channel();
+        let spawned = thread::Builder::new().name("slot-update-check".into()).spawn(move || {
+            let _ = tx.send(check());
+        });
+        match spawned {
+            Ok(_) => self.answer = Some(rx),
+            Err(e) => eprintln!("slot: update check: {e}"),
+        }
+    }
+
+    fn found(&mut self, got: Result<Manifest, String>, installed: &Installed) -> bool {
+        match got {
+            Ok(m) => self.take((update::offer(installed, &m) == Offer::Newer).then_some(m)),
+            Err(e) => {
+                eprintln!("slot: update check: {e}");
+                false
+            }
+        }
+    }
+
+    /// What HOME → Update found, which counts as this half hour's check. True when the symbol
+    /// is to come or go.
+    pub fn set(&mut self, now: u64, newer: Option<Manifest>) -> bool {
+        self.due = now + RECHECK_MS;
+        self.answer = None;
+        self.take(newer)
+    }
+
+    fn take(&mut self, newer: Option<Manifest>) -> bool {
+        std::mem::replace(&mut self.newer, newer).is_some() != self.newer.is_some()
+    }
+
+    pub fn newer(&self) -> Option<&Manifest> {
+        self.newer.as_ref()
+    }
+}
+
+/// Installs `m` unless the channel has a newer update than it now, as when the check was made
+/// a while ago; that one is handed back to be shown instead.
+fn install_latest(
+    m: &Manifest,
+    latest: Result<Manifest, String>,
+    install: impl FnOnce() -> Result<(), String>,
+) -> Result<Option<Manifest>, String> {
+    let latest = latest?;
+    if latest != *m {
+        return Ok(Some(latest));
+    }
+    install().map(|()| None)
+}
+
 fn mb(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / (1 << 20) as f64)
 }
@@ -397,6 +520,118 @@ mod tests {
         };
         s.found = Some((m, Offer::Newer));
         s.row = 1;
+    }
+
+    fn release(version: &str) -> Manifest {
+        Manifest {
+            channel: Channel::Release,
+            version: version.into(),
+            commit: "abcdef0123".into(),
+            zip: "z.zip".into(),
+            size: 1,
+            sha256: [0; 32],
+            notes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn no_check_starts_until_it_is_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut b = AutoCheck::default();
+        assert!(!b.poll(dir.path(), 0, false));
+        assert!(b.answer.is_none());
+    }
+
+    #[test]
+    fn the_symbol_shows_only_for_a_newer_slot_and_goes_once_up_to_date() {
+        let installed = Installed { version: "v0.43".into(), commit: "1111111".into(), channel: Channel::Release };
+        let mut b = AutoCheck::default();
+        assert!(!b.found(Ok(release("v0.43")), &installed));
+        assert!(b.newer().is_none());
+        assert!(b.found(Ok(release("v0.44")), &installed));
+        assert_eq!(b.newer().map(|m| m.version.as_str()), Some("v0.44"));
+        assert!(b.set(0, None));
+        assert!(b.newer().is_none());
+    }
+
+    fn settle(b: &mut AutoCheck, dir: &Path, now: u64) {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while b.answer.is_some() && std::time::Instant::now() < until {
+            b.poll(dir, now, false);
+        }
+    }
+
+    #[test]
+    fn a_failed_check_shows_nothing_and_waits_half_an_hour() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut b = AutoCheck::default();
+        b.start(1_000, || Err("no internet".into()));
+        settle(&mut b, dir.path(), 1_000);
+        assert!(b.answer.is_none() && b.newer().is_none());
+        b.poll(dir.path(), 1_000 + RECHECK_MS - 1, true);
+        assert!(b.answer.is_none(), "asked again too soon");
+        b.poll(dir.path(), 1_000 + RECHECK_MS, true);
+        assert!(b.answer.is_some(), "not asked after half an hour");
+    }
+
+    #[test]
+    fn closing_a_game_checks_again_straight_away() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut b = AutoCheck::default();
+        b.set(1_000, None);
+        b.poll(dir.path(), 2_000, true);
+        assert!(b.answer.is_none());
+        b.soon();
+        b.poll(dir.path(), 2_000, true);
+        assert!(b.answer.is_some());
+    }
+
+    #[test]
+    fn install_takes_a_newer_update_out_since_the_check_instead() {
+        let (old, new) = (release("v0.44"), release("v0.45"));
+        let mut ran = false;
+        assert_eq!(install_latest(&old, Ok(new.clone()), || {
+            ran = true;
+            Ok(())
+        }), Ok(Some(new)));
+        assert!(!ran, "installed the old one");
+        assert_eq!(install_latest(&old, Ok(old.clone()), || {
+            ran = true;
+            Ok(())
+        }), Ok(None));
+        assert!(ran);
+        assert!(install_latest(&old, Err("no internet".into()), || panic!("installed unchecked")).is_err());
+    }
+
+    #[test]
+    fn a_newer_update_found_at_install_is_shown_to_install_next() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = screen(dir.path());
+        found(&mut s);
+        let (tx, rx) = mpsc::channel();
+        s.installing = Some(Installing { rx, progress: Arc::new(Progress::default()), size: 1, shown: 0 });
+        tx.send(Ok(Some(release("v0.45")))).unwrap();
+        assert!(s.poll());
+        assert!(!s.busy());
+        assert_eq!(s.lines()[1], "INSTALL V0.45");
+        assert_eq!(s.take_verdict().flatten().map(|m| m.version), Some("v0.45".into()));
+    }
+
+    #[test]
+    fn an_update_already_found_is_shown_without_checking_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = UpdateScreen::open(dir.path(), Some(release("v99.0")));
+        assert!(!s.busy(), "checked again");
+        assert_eq!(s.lines()[1], "INSTALL V99.0");
+        assert_eq!(s.row(), 1);
+    }
+
+    #[test]
+    fn a_found_update_for_another_channel_is_checked_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut dev = release("v99.0");
+        dev.channel = Channel::Dev;
+        assert!(UpdateScreen::open(dir.path(), Some(dev)).busy());
     }
 
     #[test]
