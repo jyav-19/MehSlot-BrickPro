@@ -7,6 +7,8 @@
 //! The method, and the outline numbers, are ported from omega-zero by oauramos
 //! (https://github.com/oauramos/omega-zero), as Slot is GPL-3.0.
 
+use std::sync::OnceLock;
+
 use slot_gfx::{Draw, MeshId, MeshVertex, TexId};
 
 /// How thick a cart is, as a share of its width: a Game Pak is about 8 mm thick and 57 wide.
@@ -126,4 +128,16 @@ pub fn posed_cart(
         turn,
         yaw,
     }
+}
+
+/// The GBA cart's model once it is on the GPU, set once by the frontend.
+static GBA_MESH: OnceLock<MeshId> = OnceLock::new();
+
+pub fn set_gba_mesh(mesh: MeshId) {
+    let _ = GBA_MESH.set(mesh);
+}
+
+/// The GBA cart's model, if the frontend has put it on the GPU: without it carts are drawn flat.
+pub fn gba() -> Option<MeshId> {
+    GBA_MESH.get().copied()
 }

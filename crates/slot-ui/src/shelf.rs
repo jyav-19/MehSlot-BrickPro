@@ -3,12 +3,21 @@ use slot_store::Cart;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::cart::{cart_box, gb_shell_of, nes_famicom_of, snes_shell_of, label_colour, label_text, CART_H, CART_W};
+use crate::cart_mesh;
 use crate::hud::Millis;
 use crate::silhouette::{GbShell, NesShell, SnesShell};
 use crate::slot_chrome::{draw_empty_slot, MOUTH_H};
 
 const SIDE_SCALE: f32 = 0.78;
 const SIDE_ALPHA: f32 = 0.55;
+
+/// How far the selected GBA cart sways either side of square (20 degrees), how long one sway
+/// takes, how long it keeps swaying after the shelf last moved (so an idle shelf goes quiet and
+/// stops redrawing), and how long the sway then takes to die away.
+const SWAY_MAX: f32 = 20.0 * std::f32::consts::PI / 180.0;
+const SWAY_PERIOD_S: f32 = 4.0;
+const SWAY_FOR_S: f32 = 20.0;
+const SWAY_FADE_S: f32 = 1.5;
 
 static SLACK: AtomicU32 = AtomicU32::new(0);
 
@@ -86,6 +95,9 @@ pub struct Shelf {
     ride: f32,
     vel: f32,
     held: Option<(i32, Millis, usize)>,
+    /// Where the sway is in its cycle, and how long the shelf has stood still.
+    clock: f32,
+    still: f32,
 }
 
 impl Shelf {
@@ -110,6 +122,8 @@ impl Shelf {
             ride: 0.0,
             vel: 0.0,
             held: None,
+            clock: 0.0,
+            still: 0.0,
         }
     }
 
@@ -413,6 +427,15 @@ impl Shelf {
         let accel = -2.0 * OMEGA * self.vel - OMEGA * OMEGA * (self.scroll - self.scroll_target());
         self.vel += accel * dt;
         self.scroll += self.vel * dt;
+        let moving = self.vel.abs() > 0.01 || (self.scroll - self.scroll_target()).abs() > 0.001;
+        self.still = if moving { 0.0 } else { self.still + dt };
+        self.clock = (self.clock + dt) % SWAY_PERIOD_S;
+    }
+
+    /// How much of its sway the selected cart still has: all of it, then none once the shelf
+    /// has stood still a while.
+    fn sway_amp(&self) -> f32 {
+        (1.0 - (self.still - SWAY_FOR_S).max(0.0) / SWAY_FADE_S).clamp(0.0, 1.0)
     }
 
     /// Where the selected cart's foot rests, when the shelf is still.
@@ -449,6 +472,10 @@ impl Shelf {
             let t = offset.abs().min(1.0);
             let scale = shrink(offset);
             let alpha = (1.0 + (SIDE_ALPHA - 1.0) * t) * (1.0 - recede);
+            let yaw = SWAY_MAX
+                * (self.clock / SWAY_PERIOD_S * std::f32::consts::TAU).sin()
+                * self.sway_amp()
+                * (1.0 - t);
             let (cw, ch) = cart_box(cart.platform);
             let (w, h) = (cw as f32 * scale, ch as f32 * scale);
             let away = offset.signum() * (1.0 + offset.abs());
@@ -481,13 +508,23 @@ impl Shelf {
                 }
             }
             out.push(match self.face(i) {
-                Some(tex) => Draw::Tex {
-                    x,
-                    y,
-                    w,
-                    h,
-                    tex,
-                    alpha: alpha * dim,
+                Some(tex) => match (self.shells.get(i), cart_mesh::gba()) {
+                    (Some(Backing::Gba), Some(mesh)) => cart_mesh::posed_cart(
+                        (x, y, w, h),
+                        mesh,
+                        tex,
+                        [1.0, 1.0, 1.0, alpha * dim],
+                        0.0,
+                        yaw,
+                    ),
+                    _ => Draw::Tex {
+                        x,
+                        y,
+                        w,
+                        h,
+                        tex,
+                        alpha: alpha * dim,
+                    },
                 },
                 None => {
                     let c = label_colour(&label_text(cart));
