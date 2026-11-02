@@ -512,13 +512,32 @@ impl Shelf {
                     Some(Backing::Gba) | None => self.shadow,
                 };
                 if let Some(tex) = backing {
-                    out.push(Draw::Tex {
-                        x,
-                        y,
-                        w,
-                        h,
-                        tex,
-                        alpha: recede_alpha(alpha),
+                    // The backing is the cart's black silhouette. A cart drawn as a model is
+                    // backed by the same model, turned the same way, so no flat black shape
+                    // sticks out round it as it sways.
+                    let mesh = self
+                        .shells
+                        .get(i)
+                        .copied()
+                        .and_then(mesh_kind)
+                        .and_then(cart_mesh::mesh_of);
+                    out.push(match mesh {
+                        Some(mesh) => cart_mesh::posed_cart(
+                            (x, y, w, h),
+                            mesh,
+                            tex,
+                            [1.0, 1.0, 1.0, recede_alpha(alpha)],
+                            0.0,
+                            yaw,
+                        ),
+                        None => Draw::Tex {
+                            x,
+                            y,
+                            w,
+                            h,
+                            tex,
+                            alpha: recede_alpha(alpha),
+                        },
                     });
                 }
             }
