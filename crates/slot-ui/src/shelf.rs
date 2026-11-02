@@ -72,6 +72,21 @@ fn backing(cart: &Cart) -> Backing {
     }
 }
 
+/// Which model a cart on the shelf is drawn with.
+fn mesh_kind(backing: Backing) -> Option<cart_mesh::Kind> {
+    use cart_mesh::Kind;
+    Some(match backing {
+        Backing::Gba => Kind::Gba,
+        Backing::Gb(GbShell::Notched) => Kind::GbNotched,
+        Backing::Gb(GbShell::Rounded) => Kind::GbRounded,
+        Backing::Nes(NesShell::Nes) => Kind::Nes,
+        Backing::Nes(NesShell::Famicom) => Kind::Famicom,
+        Backing::Snes(SnesShell::Us) => Kind::SnesUs,
+        Backing::Snes(SnesShell::Pal) => Kind::SnesPal,
+        Backing::Disc => Kind::Disc,
+    })
+}
+
 pub struct Shelf {
     pub carts: Vec<Cart>,
     pub index: usize,
@@ -508,8 +523,8 @@ impl Shelf {
                 }
             }
             out.push(match self.face(i) {
-                Some(tex) => match (self.shells.get(i), cart_mesh::gba()) {
-                    (Some(Backing::Gba), Some(mesh)) => cart_mesh::posed_cart(
+                Some(tex) => match self.shells.get(i).copied().and_then(mesh_kind).and_then(cart_mesh::mesh_of) {
+                    Some(mesh) => cart_mesh::posed_cart(
                         (x, y, w, h),
                         mesh,
                         tex,

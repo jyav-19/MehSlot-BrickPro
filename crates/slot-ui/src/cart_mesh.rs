@@ -11,6 +11,9 @@ use std::sync::OnceLock;
 
 use slot_gfx::{Draw, MeshId, MeshVertex, TexId};
 
+use crate::cart::{GB_CART_H, GB_CART_W, NES_CART_H, NES_CART_W, SNES_CART_H, SNES_CART_W};
+use crate::silhouette::{gb_cart_mask, nes_cart_mask, snes_cart_mask, GbShell, NesShell, SnesShell};
+
 /// How thick a cart is, as a share of its width: a Game Pak is about 8 mm thick and 57 wide.
 pub const THICK: f32 = 0.14;
 
@@ -60,7 +63,17 @@ pub fn gba_mesh() -> Vec<MeshVertex> {
 /// the texture's own alpha cuts; and its sides, one flat polygon for each cut of its outline
 /// `points` (in drawing units, the drawing `uw` by `uh`), back to `thick`, each taking its
 /// colour from the face just inside its edge. Sides come first, so the face covers them.
-pub fn extruded(points: &[(f32, f32)], (uw, uh): (f32, f32), thick: f32) -> Vec<MeshVertex> {
+pub fn extruded(points: &[(f32, f32)], units: (f32, f32), thick: f32) -> Vec<MeshVertex> {
+    extruded_sampled(points, units, thick, SIDE_SAMPLE)
+}
+
+/// [`extruded`], its sides taking their colour from `reach` drawing units inside the edge.
+pub fn extruded_sampled(
+    points: &[(f32, f32)],
+    (uw, uh): (f32, f32),
+    thick: f32,
+    reach: f32,
+) -> Vec<MeshVertex> {
     let mut out = Vec::new();
     for (i, &a) in points.iter().enumerate() {
         let b = points[(i + 1) % points.len()];
@@ -72,8 +85,8 @@ pub fn extruded(points: &[(f32, f32)], (uw, uh): (f32, f32), thick: f32) -> Vec<
         let normal = [dy / len, -dx / len, 0.0];
         let sample = |p: (f32, f32)| {
             [
-                (p.0 - normal[0] * SIDE_SAMPLE) / uw,
-                (p.1 - normal[1] * SIDE_SAMPLE) / uh,
+                (p.0 - normal[0] * reach) / uw,
+                (p.1 - normal[1] * reach) / uh,
             ]
         };
         let corner = |p: (f32, f32), z: f32, shade: f32| MeshVertex {
@@ -131,14 +144,173 @@ pub fn posed_cart(
     }
 }
 
-/// The GBA cart's model once it is on the GPU, set once by the frontend.
-static GBA_MESH: OnceLock<MeshId> = OnceLock::new();
-
-pub fn set_gba_mesh(mesh: MeshId) {
-    let _ = GBA_MESH.set(mesh);
+/// The cart shapes that have a model: each is a cart's outline pushed back into a slab.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Kind {
+    Gba,
+    GbNotched,
+    GbRounded,
+    Nes,
+    Famicom,
+    SnesUs,
+    SnesPal,
+    Disc,
 }
 
-/// The GBA cart's model, if the frontend has put it on the GPU: without it carts are drawn flat.
-pub fn gba() -> Option<MeshId> {
-    GBA_MESH.get().copied()
+impl Kind {
+    pub const ALL: [Kind; 8] = [
+        Kind::Gba,
+        Kind::GbNotched,
+        Kind::GbRounded,
+        Kind::Nes,
+        Kind::Famicom,
+        Kind::SnesUs,
+        Kind::SnesPal,
+        Kind::Disc,
+    ];
+
+    fn index(self) -> usize {
+        Kind::ALL.iter().position(|k| *k == self).unwrap_or(0)
+    }
+}
+
+/// How thick the NES, Famicom and SNES carts are, as a share of their width (about; the Game
+/// Pak's is `THICK`).
+const NES_THICK: f32 = 0.15;
+const FAMICOM_THICK: f32 = 0.14;
+const SNES_THICK: f32 = 0.15;
+
+/// A cart's model, ready to hand to the GPU once. The GBA's outline is written out; the others
+/// are traced from the cart's own silhouette, so a side always meets the edge of its face.
+pub fn mesh_vertices(kind: Kind) -> Vec<MeshVertex> {
+    let traced = |mask: &[u8], w: u32, h: u32, thick: f32| {
+        let (points, units) = traced_outline(mask, w as usize, h as usize);
+        extruded_sampled(&points, units, thick, SIDE_SAMPLE * units.0 / 240.0)
+    };
+    match kind {
+        Kind::Gba => gba_mesh(),
+        Kind::GbNotched => traced(gb_cart_mask(GbShell::Notched), GB_CART_W, GB_CART_H, THICK),
+        Kind::GbRounded => traced(gb_cart_mask(GbShell::Rounded), GB_CART_W, GB_CART_H, THICK),
+        Kind::Nes => traced(nes_cart_mask(NesShell::Nes), NES_CART_W, NES_CART_H, NES_THICK),
+        Kind::Famicom => traced(
+            nes_cart_mask(NesShell::Famicom),
+            NES_CART_W,
+            NES_CART_H,
+            FAMICOM_THICK,
+        ),
+        Kind::SnesUs => traced(snes_cart_mask(SnesShell::Us), SNES_CART_W, SNES_CART_H, SNES_THICK),
+        Kind::SnesPal => traced(
+            snes_cart_mask(SnesShell::Pal),
+            SNES_CART_W,
+            SNES_CART_H,
+            SNES_THICK,
+        ),
+        Kind::Disc => disc_mesh(),
+    }
+}
+
+/// How thick a disc is, as a share of its width (a real one is 1 mm in 120, too thin to see
+/// the side of; this one is thicker so its edge shows as it sways), and how many cuts its
+/// round outline has.
+const DISC_THICK: f32 = 0.03;
+const DISC_SEGMENTS: usize = 48;
+
+/// A disc: a round outline pushed back a little. The hole and the see-through hub are cut by
+/// the disc's face itself, as a cart's outline is.
+fn disc_mesh() -> Vec<MeshVertex> {
+    let n = crate::disc::DISC_PX as f32;
+    let r = n / 2.0;
+    let points: Vec<(f32, f32)> = (0..DISC_SEGMENTS)
+        .map(|i| {
+            let turn = std::f32::consts::TAU * i as f32 / DISC_SEGMENTS as f32;
+            let a = turn - std::f32::consts::FRAC_PI_2;
+            (r + r * a.cos(), r + r * a.sin())
+        })
+        .collect();
+    extruded_sampled(&points, (n, n), DISC_THICK, SIDE_SAMPLE * n / 240.0)
+}
+
+/// A silhouette `w` by `h` (coverage, opaque inside) as an outline going round clockwise, in
+/// pixels, with the size of the picture: the left and right edge of every row, with the rows
+/// that run straight cut down to their corners.
+pub fn traced_outline(mask: &[u8], w: usize, h: usize) -> (Vec<(f32, f32)>, (f32, f32)) {
+    let mut left = Vec::new();
+    let mut right = Vec::new();
+    for y in 0..h {
+        let Some(row) = mask.get(y * w..(y + 1) * w) else {
+            break;
+        };
+        let Some(first) = row.iter().position(|&a| a > 127) else {
+            continue;
+        };
+        let last = row.iter().rposition(|&a| a > 127).unwrap_or(first);
+        let mid = y as f32 + 0.5;
+        left.push((first as f32, mid));
+        right.push((last as f32 + 1.0, mid));
+    }
+    let size = (w as f32, h as f32);
+    let (Some(&(l0, _)), Some(&(r0, _)), Some(&(ln, _)), Some(&(rn, _))) =
+        (left.first(), right.first(), left.last(), right.last())
+    else {
+        return (vec![(0.0, 0.0), (size.0, 0.0), (size.0, size.1), (0.0, size.1)], size);
+    };
+    let mut down = vec![(r0, 0.0)];
+    down.extend(right.iter().copied());
+    down.push((rn, size.1));
+    let mut up = vec![(ln, size.1)];
+    up.extend(left.iter().rev().copied());
+    up.push((l0, 0.0));
+    let mut all = simplify(&down, TRACE_TOLERANCE);
+    all.extend(simplify(&up, TRACE_TOLERANCE));
+    (all, size)
+}
+
+/// How far, in pixels, a traced outline may stray from the silhouette it follows.
+const TRACE_TOLERANCE: f32 = 0.8;
+
+/// `points`, a line, with the points that lie within `tolerance` of the line between their
+/// neighbours left out (Ramer-Douglas-Peucker).
+fn simplify(points: &[(f32, f32)], tolerance: f32) -> Vec<(f32, f32)> {
+    if points.len() < 3 {
+        return points.to_vec();
+    }
+    let (a, b) = (points[0], points[points.len() - 1]);
+    let (mut far, mut at) = (0.0f32, 0usize);
+    for (i, &p) in points.iter().enumerate().take(points.len() - 1).skip(1) {
+        let d = distance_to_line(p, a, b);
+        if d > far {
+            far = d;
+            at = i;
+        }
+    }
+    if far <= tolerance {
+        return vec![a, b];
+    }
+    let mut first = simplify(&points[..=at], tolerance);
+    let second = simplify(&points[at..], tolerance);
+    first.pop();
+    first.extend(second);
+    first
+}
+
+fn distance_to_line(p: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-3 {
+        return ((p.0 - a.0).powi(2) + (p.1 - a.1).powi(2)).sqrt();
+    }
+    ((p.0 - a.0) * dy - (p.1 - a.1) * dx).abs() / len
+}
+
+/// Every cart model once it is on the GPU, set once by the frontend, in the order of
+/// [`Kind::ALL`].
+static MESHES: OnceLock<[MeshId; 8]> = OnceLock::new();
+
+pub fn set_meshes(ids: [MeshId; 8]) {
+    let _ = MESHES.set(ids);
+}
+
+/// The model of `kind`, if the frontend has put it on the GPU: without it carts are drawn flat.
+pub fn mesh_of(kind: Kind) -> Option<MeshId> {
+    MESHES.get().map(|ids| ids[kind.index()])
 }

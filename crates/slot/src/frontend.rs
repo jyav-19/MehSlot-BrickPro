@@ -473,7 +473,9 @@ impl Frontend {
         let disc = compositor.create_texture(disc.w, disc.h, &disc.rgba);
         self.session.app_mut().set_disc_shadow(disc);
         // The GBA cart's model, which the shelf draws the cart with once it is on the GPU.
-        slot_ui::cart_mesh::set_gba_mesh(compositor.create_mesh(&slot_ui::cart_mesh::gba_mesh()));
+        let meshes = slot_ui::cart_mesh::Kind::ALL
+            .map(|kind| compositor.create_mesh(&slot_ui::cart_mesh::mesh_vertices(kind)));
+        slot_ui::cart_mesh::set_meshes(meshes);
         let bolt = icon_face(Icon::Charging, BOLT_PX, HUD_INK);
         let bolt_id = compositor.create_texture(bolt.w, bolt.h, &bolt.rgba);
         self.session.app_mut().set_bolt_face(bolt_id);
