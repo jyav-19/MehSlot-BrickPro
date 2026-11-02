@@ -212,7 +212,7 @@ pub fn mesh_vertices(kind: Kind) -> Vec<MeshVertex> {
 /// How thick a disc is, as a share of its width (a real one is 1 mm in 120, too thin to see
 /// the side of; this one is thicker so its edge shows as it sways), and how many cuts its
 /// round outline has.
-const DISC_THICK: f32 = 0.03;
+const DISC_THICK: f32 = 0.02;
 const DISC_SEGMENTS: usize = 48;
 
 /// A disc: a round outline pushed back a little. The hole and the see-through hub are cut by
@@ -227,7 +227,15 @@ fn disc_mesh() -> Vec<MeshVertex> {
             (r + r * a.cos(), r + r * a.sin())
         })
         .collect();
-    extruded_sampled(&points, (n, n), DISC_THICK, SIDE_SAMPLE * n / 240.0)
+    let mut mesh = extruded_sampled(&points, (n, n), DISC_THICK, SIDE_SAMPLE * n / 240.0);
+    // The edge is one plain silver band, as on a real disc, whatever is printed on the face: a
+    // texture coordinate left of the picture tells the shader to use the flat colour instead.
+    for corner in &mut mesh {
+        if corner.normal[2] == 0.0 {
+            corner.uv = [-1.0, 0.0];
+        }
+    }
+    mesh
 }
 
 /// A silhouette `w` by `h` (coverage, opaque inside) as an outline going round clockwise, in

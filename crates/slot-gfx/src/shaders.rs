@@ -242,7 +242,10 @@ uniform float u_dither;
 varying vec2 v_uv;
 varying float v_light;
 void main() {
-    vec4 c = texture2D(u_tex, v_uv) * u_colour;
+    // A texture coordinate left of the picture (x below -0.5) means a flat silver, the colour of
+    // a disc's edge, in place of the texture.
+    vec4 silver = vec4(0.788, 0.792, 0.808, 1.0);
+    vec4 c = mix(texture2D(u_tex, v_uv), silver, 1.0 - step(-0.5, v_uv.x)) * u_colour;
     c.rgb *= v_light;
     vec2 p = mod(floor(gl_FragCoord.xy / u_dither), 4.0);
     vec2 q = mod(p, 2.0);

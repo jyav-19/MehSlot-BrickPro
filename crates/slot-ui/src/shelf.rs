@@ -11,10 +11,10 @@ use crate::slot_chrome::{draw_empty_slot, MOUTH_H};
 const SIDE_SCALE: f32 = 0.78;
 const SIDE_ALPHA: f32 = 0.55;
 
-/// How far the selected GBA cart sways either side of square (20 degrees), how long one sway
+/// How far the selected GBA cart sways either side of square (25 degrees), how long one sway
 /// takes, how long it keeps swaying after the shelf last moved (so an idle shelf goes quiet and
 /// stops redrawing), and how long the sway then takes to die away.
-const SWAY_MAX: f32 = 20.0 * std::f32::consts::PI / 180.0;
+const SWAY_MAX: f32 = 25.0 * std::f32::consts::PI / 180.0;
 const SWAY_PERIOD_S: f32 = 4.0;
 const SWAY_FOR_S: f32 = 20.0;
 const SWAY_FADE_S: f32 = 1.5;
