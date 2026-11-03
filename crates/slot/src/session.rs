@@ -13,7 +13,7 @@ use crate::audio::{AudioSink, Ring, Sfx};
 use crate::core::open_core;
 use crate::emu::{CoreState, EmuHandle, Speed};
 use crate::frames::FrameRef;
-use crate::input::Pad;
+use crate::input::{ButtonMaps, Pad};
 use crate::persist;
 use crate::prefetch::Prefetch;
 
@@ -24,6 +24,8 @@ pub struct Session {
     sink: Box<dyn AudioSink>,
     gestures: Gestures,
     pad: Pad,
+    /// Which game button each physical button sends, from Config/controls.ini.
+    controls: ButtonMaps,
     rewinding: bool,
     fast: bool,
     motor: u16,
@@ -37,6 +39,13 @@ impl Session {
     pub fn boot(root: PathBuf) -> Self {
         let sink = crate::audio::take_opened();
         crate::boot_times::mark("  audio open");
+        let controls = ButtonMaps::read(&root);
+        for platform in Platform::ALL {
+            let map = controls.for_platform(platform);
+            if !map.is_empty() {
+                eprintln!("slot: controls: {platform:?} {map:?}");
+            }
+        }
         Session {
             app: App::take_booted(&root),
             root,
@@ -45,6 +54,7 @@ impl Session {
             gestures: if cfg!(feature = "brick") { Gestures::brick() } else { Gestures::new() },
             prefetch: Prefetch::default(),
             pad: Pad::default(),
+            controls,
             rewinding: false,
             fast: false,
             motor: 0,
@@ -189,7 +199,7 @@ impl Session {
             self.pad.apply(Action::GbaUp(*btn));
         }
         if let Some(emu) = &self.emu {
-            emu.set_input(self.pad.mask());
+            emu.set_input(self.pad.mask_with(self.controls.for_platform(self.app.platform())));
         }
     }
 

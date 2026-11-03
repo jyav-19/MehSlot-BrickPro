@@ -30,6 +30,31 @@ impl Pad {
     pub fn clear(&mut self) {
         self.mask = 0;
     }
+
+    /// The mask the game is handed: each button held, sent where `map` says, or as itself if
+    /// it is not listed.
+    pub fn mask_with(&self, map: &[(Btn, Option<Btn>)]) -> ButtonMask {
+        if map.is_empty() {
+            return self.mask();
+        }
+        let mut out = 0u16;
+        for btn in super::controls::GAME_BUTTONS {
+            let Some(held) = bit(btn) else {
+                continue;
+            };
+            if self.mask & held == 0 {
+                continue;
+            }
+            let sends = map
+                .iter()
+                .find(|(from, _)| *from == btn)
+                .map_or(Some(btn), |(_, to)| *to);
+            if let Some(sent) = sends.and_then(bit) {
+                out |= sent;
+            }
+        }
+        ButtonMask(out)
+    }
 }
 
 fn bit(btn: Btn) -> Option<u16> {
@@ -51,4 +76,30 @@ fn bit(btn: Btn) -> Option<u16> {
         Btn::Select => ButtonMask::SELECT,
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_remapped_button_sends_what_it_is_told_and_two_can_share() {
+        let mut pad = Pad::default();
+        pad.apply(Action::GbaDown(Btn::X));
+        pad.apply(Action::GbaDown(Btn::Y));
+        let map = [(Btn::X, Some(Btn::Start)), (Btn::Y, Some(Btn::Start))];
+        assert_eq!(pad.mask_with(&map).0, ButtonMask::START);
+        pad.apply(Action::GbaUp(Btn::X));
+        assert_eq!(pad.mask_with(&map).0, ButtonMask::START, "Y still holds Start");
+        pad.apply(Action::GbaUp(Btn::Y));
+        assert_eq!(pad.mask_with(&map).0, 0);
+    }
+
+    #[test]
+    fn a_button_not_listed_sends_itself_and_none_sends_nothing() {
+        let mut pad = Pad::default();
+        pad.apply(Action::GbaDown(Btn::A));
+        pad.apply(Action::GbaDown(Btn::B));
+        assert_eq!(pad.mask_with(&[(Btn::B, None)]).0, ButtonMask::A);
+    }
 }

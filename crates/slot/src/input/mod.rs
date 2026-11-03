@@ -25,3 +25,5 @@ pub use host::HostInput;
 pub use mask::Pad;
 #[cfg(feature = "sim")]
 pub use sim::SimInput;
+mod controls;
+pub use controls::ButtonMaps;
