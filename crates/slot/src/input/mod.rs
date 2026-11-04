@@ -26,4 +26,4 @@ pub use mask::Pad;
 #[cfg(feature = "sim")]
 pub use sim::SimInput;
 mod controls;
-pub use controls::ButtonMaps;
+pub use controls::{read_shortcuts, write_shortcuts, ButtonMaps};

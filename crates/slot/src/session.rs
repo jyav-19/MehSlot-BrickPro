@@ -40,6 +40,7 @@ impl Session {
         let sink = crate::audio::take_opened();
         crate::boot_times::mark("  audio open");
         let controls = ButtonMaps::read(&root);
+        let shortcuts = crate::input::read_shortcuts(&root, cfg!(feature = "brick"));
         for platform in Platform::ALL {
             let map = controls.for_platform(platform);
             if !map.is_empty() {
@@ -51,7 +52,11 @@ impl Session {
             root,
             emu: None,
             sink,
-            gestures: if cfg!(feature = "brick") { Gestures::brick() } else { Gestures::new() },
+            gestures: {
+                let mut gestures = if cfg!(feature = "brick") { Gestures::brick() } else { Gestures::new() };
+                gestures.set_shortcuts(shortcuts);
+                gestures
+            },
             prefetch: Prefetch::default(),
             pad: Pad::default(),
             controls,
@@ -176,7 +181,9 @@ impl Session {
 
     #[cfg(feature = "brick")]
     pub fn reset_sleep_input(&mut self) {
+        let shortcuts = self.gestures.shortcuts().clone();
         self.gestures = Gestures::brick();
+        self.gestures.set_shortcuts(shortcuts);
         self.pad.clear();
         self.rewinding = false;
         self.fast = false;

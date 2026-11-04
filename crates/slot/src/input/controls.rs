@@ -115,3 +115,18 @@ mod tests {
         assert!(maps.for_platform(Platform::ALL[0]).is_empty());
     }
 }
+
+/// The shortcuts: the standard ones with those `Config/shortcuts.ini` changes.
+pub fn read_shortcuts(root: &Path, home_chords: bool) -> slot_input::Shortcuts {
+    let text = std::fs::read_to_string(root.join("Config").join("shortcuts.ini")).unwrap_or_default();
+    slot_input::Shortcuts::parse(&text, home_chords)
+}
+
+/// Writes `Config/shortcuts.ini` through a temporary file.
+pub fn write_shortcuts(root: &Path, shortcuts: &slot_input::Shortcuts) -> std::io::Result<()> {
+    let dir = root.join("Config");
+    std::fs::create_dir_all(&dir)?;
+    let temp = dir.join("shortcuts.ini.tmp");
+    std::fs::write(&temp, shortcuts.to_text())?;
+    std::fs::rename(temp, dir.join("shortcuts.ini"))
+}

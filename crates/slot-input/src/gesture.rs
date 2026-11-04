@@ -54,6 +54,9 @@ pub enum Action {
     PowerOff,
     LidClose,
     LidOpen,
+    /// While capturing (the Controls page asking for a new shortcut): the next shortcut pressed,
+    /// reported in place of its action.
+    Capture(Modifier, Btn),
 }
 
 #[derive(Copy, Clone, Default)]
@@ -72,7 +75,7 @@ enum Select {
 pub struct Gestures {
     select: Select,
     home_chords: bool,
-    chord_held: u16,
+    chord_held: u32,
     menu_down_at: Option<Millis>,
     menu_last_tap: Option<Millis>,
     menu_eject_fired: bool,
@@ -93,6 +96,10 @@ pub struct Gestures {
     /// the game, and fast forward moves to HOME+R2 (HOME+L2 asks for a rewind, which a
     /// PlayStation game doesn't record).
     triggers_to_game: bool,
+    /// The shortcuts: which button held with SELECT or HOME does what.
+    shortcuts: Shortcuts,
+    /// The next shortcut pressed is reported as `Action::Capture`, not done.
+    capture: bool,
 }
 
 fn ramp_due(down: Option<Millis>, last: Option<Millis>, now: Millis) -> bool {
@@ -111,11 +118,25 @@ impl Gestures {
     }
 
     pub fn brick() -> Self {
-        Self { home_chords: true, ..Self::default() }
+        Self { home_chords: true, shortcuts: Shortcuts::standard(true), ..Self::default() }
     }
 
     pub fn set_triggers_to_game(&mut self, on: bool) {
         self.triggers_to_game = on;
+    }
+
+    pub fn shortcuts(&self) -> &Shortcuts {
+        &self.shortcuts
+    }
+
+    /// New shortcuts: any combo held down is let go of first.
+    pub fn set_shortcuts(&mut self, shortcuts: Shortcuts) {
+        self.shortcuts = shortcuts;
+        self.chord_held &= TRIGGER_BITS;
+    }
+
+    pub fn set_capture(&mut self, on: bool) {
+        self.capture = on;
     }
 
     pub fn ff_latched(&self) -> bool {
@@ -191,21 +212,23 @@ impl Gestures {
                 _ => self.ff_down(now),
             };
         }
-        if let (true, Some(_), Some((bit, action))) = (self.home_chords, self.menu_down_at, home_chord(b)) {
-            if self.chord_held & bit != 0 { return Vec::new(); }
+        if let Some(captured) = self.capture_chord(b, now) {
+            return captured;
+        }
+        if let (true, Some(_), Some((at, action))) =
+            (self.home_chords, self.menu_down_at, self.shortcuts.find(Modifier::Home, b))
+        {
+            let bit = 1u32 << at;
+            if self.chord_held & bit != 0 {
+                return Vec::new();
+            }
             self.chord_held |= bit;
             self.menu_eject_fired = true; // consume Home: no tap menu or hold eject
             return vec![action];
         }
-        // Brick: the picture shortcut sits with Y (colour correction) and A (shaders).
-        if self.home_chords && b == Btn::X && self.chording(now) {
+        if let (true, Some((at, action))) = (self.chording(now), self.shortcuts.find(Modifier::Select, b)) {
             self.mark_chorded();
-            self.chord_held |= HOME_X;
-            return vec![Action::PictureToggle];
-        }
-        if let (true, Some((bit, action))) = (self.chording(now), chord(b)) {
-            self.mark_chorded();
-            self.chord_held |= bit;
+            self.chord_held |= 1u32 << at;
             return vec![action];
         }
         match b {
@@ -241,19 +264,11 @@ impl Gestures {
                 return vec![Action::GbaUp(b)];
             }
         }
-        if b == Btn::X && self.chord_held & HOME_X != 0 {
-            self.chord_held &= !HOME_X;
+        let held = (0..self.shortcuts.list.len())
+            .find(|at| self.chord_held & (1u32 << at) != 0 && self.shortcuts.list[*at].combo.is_some_and(|(_, button)| button == b));
+        if let Some(at) = held {
+            self.chord_held &= !(1u32 << at);
             return Vec::new();
-        }
-        if let Some((bit, _)) = home_chord(b).filter(|(bit, _)| self.chord_held & bit != 0) {
-            self.chord_held &= !bit;
-            return Vec::new();
-        }
-        if let Some((bit, _)) = chord(b) {
-            if self.chord_held & bit != 0 {
-                self.chord_held &= !bit;
-                return Vec::new();
-            }
         }
         match b {
             Btn::Select => self.select_up(now),
@@ -265,6 +280,25 @@ impl Gestures {
             Btn::R2 => self.ff_up(now),
             _ => vec![Action::GbaUp(b)],
         }
+    }
+
+    /// With capture on, a shortcut pressed (SELECT or HOME held, then a button) is reported as
+    /// `Action::Capture` and capture is over. None when this is not such a press.
+    fn capture_chord(&mut self, b: Btn, now: Millis) -> Option<Vec<Action>> {
+        if !self.capture || !BINDABLE.contains(&b) {
+            return None;
+        }
+        let modifier = if self.home_chords && self.menu_down_at.is_some() {
+            self.menu_eject_fired = true; // consume Home: no tap menu or hold eject
+            Modifier::Home
+        } else if self.chording(now) {
+            self.mark_chorded();
+            Modifier::Select
+        } else {
+            return None;
+        };
+        self.capture = false;
+        Some(vec![Action::Capture(modifier, b)])
     }
 
     fn chording(&self, now: Millis) -> bool {
@@ -470,42 +504,213 @@ impl Gestures {
     }
 }
 
-/// Held-bit for the Brick's picture shortcut on X (X has no shared chord).
-const HOME_X: u16 = 2048;
-/// Brick Home chords: Home with A (next shader), B (LEDs) or a shoulder (overlay), and the bit
-/// each holds while down. A and B share their bits with the Select chords on those buttons.
-/// HOME+L2 / HOME+R2 while the triggers belong to the game: held, as the triggers alone are.
-fn trigger_bit(b: Btn) -> Option<u16> {
+/// The held-bits HOME+L2 and HOME+R2 use while the triggers belong to the game, past the bits the
+/// shortcuts use (one each, by their place in the list): held, as the triggers alone are.
+const TRIGGER_BITS: u32 = (1 << 20) | (1 << 21);
+
+fn trigger_bit(b: Btn) -> Option<u32> {
     match b {
-        Btn::L2 => Some(16384),
-        Btn::R2 => Some(32768),
+        Btn::L2 => Some(1 << 20),
+        Btn::R2 => Some(1 << 21),
         _ => None,
     }
 }
 
-fn home_chord(b: Btn) -> Option<(u16, Action)> {
-    Some(match b {
-        Btn::A => (512, Action::ShaderNext),
-        Btn::B => (1024, Action::LedToggle),
-        Btn::L1 => (4096, Action::OverlayPrev),
-        Btn::R1 => (8192, Action::OverlayNext),
-        _ => return None,
-    })
+/// The buttons a shortcut can be on.
+pub const BINDABLE: [Btn; 12] = [
+    Btn::Up,
+    Btn::Down,
+    Btn::Left,
+    Btn::Right,
+    Btn::A,
+    Btn::B,
+    Btn::X,
+    Btn::Y,
+    Btn::L1,
+    Btn::R1,
+    Btn::L2,
+    Btn::R2,
+];
+
+/// The button held with a shortcut's own: SELECT, or the Brick's HOME.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Modifier {
+    Select,
+    Home,
 }
 
-fn chord(b: Btn) -> Option<(u16, Action)> {
-    Some(match b {
-        Btn::Up => (1, Action::BrightnessUp),
-        Btn::Down => (2, Action::BrightnessDown),
-        Btn::Left => (4, Action::BlueLightDown),
-        Btn::Right => (8, Action::BlueLightUp),
-        Btn::L1 => (16, Action::LoadState),
-        Btn::R1 => (32, Action::SaveState),
-        Btn::Y => (64, Action::ColourCorrectionToggle),
-        Btn::L2 => (128, Action::PalettePrev),
-        Btn::R2 => (256, Action::PaletteNext),
-        Btn::A => (512, Action::ShaderNext),
-        Btn::B => (1024, Action::ShaderPrev),
+impl Modifier {
+    pub fn name(self) -> &'static str {
+        match self {
+            Modifier::Select => "SELECT",
+            Modifier::Home => "HOME",
+        }
+    }
+}
+
+/// One shortcut: the action it does, and the combo that does it (none when it is turned off).
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct Shortcut {
+    pub action: Action,
+    pub combo: Option<(Modifier, Btn)>,
+}
+
+/// How each shortcut is named in `Config/shortcuts.ini`, in the order of `Shortcuts::standard`.
+pub const SHORTCUT_KEYS: [&str; 16] = [
+    "brightness_up",
+    "brightness_down",
+    "blue_light_down",
+    "blue_light_up",
+    "load_state",
+    "save_state",
+    "colour_correction",
+    "palette_prev",
+    "palette_next",
+    "shader_next",
+    "shader_prev",
+    "shader_next_alt",
+    "led_toggle",
+    "overlay_prev",
+    "overlay_next",
+    "picture_toggle",
+];
+
+/// The shortcuts, in a fixed order, each with the combo that does it now.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Shortcuts {
+    pub list: Vec<Shortcut>,
+}
+
+impl Default for Shortcuts {
+    fn default() -> Self {
+        Shortcuts::standard(false)
+    }
+}
+
+impl Shortcuts {
+    /// The shortcuts as they come. With `home_chords` (the Brick) HOME shortcuts and the
+    /// picture one are there too.
+    pub fn standard(home_chords: bool) -> Shortcuts {
+        let (select, home) = (Modifier::Select, Modifier::Home);
+        let on = |modifier, button, action| Shortcut {
+            action,
+            combo: Some((modifier, button)),
+        };
+        let mut list = vec![
+            on(select, Btn::Up, Action::BrightnessUp),
+            on(select, Btn::Down, Action::BrightnessDown),
+            on(select, Btn::Left, Action::BlueLightDown),
+            on(select, Btn::Right, Action::BlueLightUp),
+            on(select, Btn::L1, Action::LoadState),
+            on(select, Btn::R1, Action::SaveState),
+            on(select, Btn::Y, Action::ColourCorrectionToggle),
+            on(select, Btn::L2, Action::PalettePrev),
+            on(select, Btn::R2, Action::PaletteNext),
+            on(select, Btn::A, Action::ShaderNext),
+            on(select, Btn::B, Action::ShaderPrev),
+        ];
+        if home_chords {
+            list.extend([
+                on(home, Btn::A, Action::ShaderNext),
+                on(home, Btn::B, Action::LedToggle),
+                on(home, Btn::L1, Action::OverlayPrev),
+                on(home, Btn::R1, Action::OverlayNext),
+                on(select, Btn::X, Action::PictureToggle),
+            ]);
+        }
+        Shortcuts { list }
+    }
+
+    /// What `modifier` held with `button` does: the shortcut's place in the list, and its action.
+    pub fn find(&self, modifier: Modifier, button: Btn) -> Option<(usize, Action)> {
+        self.list
+            .iter()
+            .enumerate()
+            .find_map(|(at, s)| (s.combo == Some((modifier, button))).then_some((at, s.action)))
+    }
+
+    /// The standard shortcuts with those a `shortcuts.ini` names changed: `save_state=HOME+X`,
+    /// or `save_state=Off`.
+    pub fn parse(text: &str, home_chords: bool) -> Shortcuts {
+        let mut shortcuts = Shortcuts::standard(home_chords);
+        for line in text.lines() {
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let Some(at) = SHORTCUT_KEYS.iter().position(|k| k.eq_ignore_ascii_case(key.trim())) else {
+                continue;
+            };
+            let (Some(shortcut), Some(combo)) = (shortcuts.list.get_mut(at), parse_combo(value)) else {
+                continue;
+            };
+            shortcut.combo = combo;
+        }
+        shortcuts
+    }
+
+    /// The text of a `shortcuts.ini`, a line to a shortcut.
+    pub fn to_text(&self) -> String {
+        let mut text = String::new();
+        for (key, shortcut) in SHORTCUT_KEYS.iter().zip(&self.list) {
+            let value = match shortcut.combo {
+                Some((modifier, button)) => format!("{}+{:?}", modifier.name(), button),
+                None => "Off".to_string(),
+            };
+            text.push_str(&format!("{key}={value}\n"));
+        }
+        text
+    }
+}
+
+/// A combo as written: `SELECT+R1`, `HOME+A`, or `Off` for none.
+fn parse_combo(value: &str) -> Option<Option<(Modifier, Btn)>> {
+    let value = value.trim();
+    if value.eq_ignore_ascii_case("off") || value.eq_ignore_ascii_case("none") {
+        return Some(None);
+    }
+    let (modifier, button) = value.split_once('+')?;
+    let modifier = match modifier.trim().to_ascii_lowercase().as_str() {
+        "select" => Modifier::Select,
+        "home" => Modifier::Home,
         _ => return None,
-    })
+    };
+    let button = BINDABLE
+        .into_iter()
+        .find(|b| format!("{b:?}").eq_ignore_ascii_case(button.trim()))?;
+    Some(Some((modifier, button)))
+}
+
+#[cfg(test)]
+mod shortcut_tests {
+    use super::*;
+
+    #[test]
+    fn the_standard_shortcuts_are_the_ones_the_brick_always_had() {
+        let s = Shortcuts::standard(true);
+        assert_eq!(s.find(Modifier::Select, Btn::R1).map(|f| f.1), Some(Action::SaveState));
+        assert_eq!(s.find(Modifier::Home, Btn::B).map(|f| f.1), Some(Action::LedToggle));
+        assert_eq!(s.find(Modifier::Select, Btn::X).map(|f| f.1), Some(Action::PictureToggle));
+        assert_eq!(Shortcuts::standard(false).list.len(), 11);
+    }
+
+    #[test]
+    fn a_shortcut_can_be_moved_and_turned_off() {
+        let s = Shortcuts::parse("save_state=HOME+X\nload_state=off\n", true);
+        assert_eq!(s.find(Modifier::Home, Btn::X).map(|f| f.1), Some(Action::SaveState));
+        assert_eq!(s.find(Modifier::Select, Btn::L1), None);
+        assert_eq!(Shortcuts::parse(&s.to_text(), true), s);
+    }
+
+    #[test]
+    fn capture_reports_the_next_combo_instead_of_doing_it() {
+        let mut g = Gestures::brick();
+        g.set_capture(true);
+        assert!(g.feed(RawEvent::Down(Btn::Select), 0).is_empty());
+        assert_eq!(
+            g.feed(RawEvent::Down(Btn::R1), 100),
+            vec![Action::Capture(Modifier::Select, Btn::R1)]
+        );
+        g.feed(RawEvent::Up(Btn::R1), 150);
+        assert_eq!(g.feed(RawEvent::Down(Btn::R1), 200), vec![Action::SaveState]);
+    }
 }
