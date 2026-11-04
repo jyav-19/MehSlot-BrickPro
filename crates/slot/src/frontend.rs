@@ -90,7 +90,6 @@ struct RebuildFaces {
 }
 
 /// The overlay over the game, read off the UI thread, and each system's Overlay row's words.
-#[derive(Default)]
 struct OverlayTex {
     picture: Option<TexId>,
     /// The overlay being read, and where it will come back.
@@ -102,6 +101,19 @@ struct OverlayTex {
     scrolls: [Option<Scroll>; QuickRow::NAMED],
     /// The carets' widths, left and right, measured once.
     carets: Option<(u32, u32)>,
+}
+
+impl Default for OverlayTex {
+    fn default() -> Self {
+        OverlayTex {
+            picture: None,
+            reading: None,
+            refused: None,
+            texts: [[None; 2]; QuickRow::NAMED],
+            scrolls: std::array::from_fn(|_| None),
+            carets: None,
+        }
+    }
 }
 
 /// A value too long to show whole beside its label: the whole of it drawn once, and the piece

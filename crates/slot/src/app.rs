@@ -401,6 +401,15 @@ pub struct App {
     overlay: Option<(PathBuf, TexId, [f32; 4])>,
     sticker_face: Option<TexId>,
     wallpaper: Option<TexId>,
+    /// Which game button each physical button sends, console by console (Controls).
+    controls: crate::input::ButtonMaps,
+    /// The console Button Remapping is showing, as a place in Platform::ALL.
+    controls_console: usize,
+    /// The shortcuts, and which version of them this is (the session hands them to the gestures when it changes).
+    shortcuts: slot_input::Shortcuts,
+    shortcuts_rev: u32,
+    /// The shortcut Controls is waiting for a new combo for.
+    capturing: Option<usize>,
     battery_percent: slot_ui::Printed,
     bolt: Option<TexId>,
     shelf_platform: slot_ui::Printed,
@@ -678,11 +687,16 @@ impl App {
             clock_faces: None,
             quick_menu_faces: None,
             quick_clock_faces: None,
-            named_texts: Default::default(),
+            named_texts: std::array::from_fn(|_| None),
             font: crate::fonts::running(),
             overlay: None,
             sticker_face: None,
             wallpaper: None,
+            controls: crate::input::ButtonMaps::default(),
+            controls_console: 0,
+            shortcuts: slot_input::Shortcuts::default(),
+            shortcuts_rev: 0,
+            capturing: None,
             battery_percent: slot_ui::Printed::default(),
             bolt: None,
             shelf_platform: slot_ui::Printed::default(),
@@ -1311,7 +1325,36 @@ impl App {
             QuickRow::ShowGba | QuickRow::ShowGb | QuickRow::ShowGbc | QuickRow::ShowNes | QuickRow::ShowSnes | QuickRow::ShowPs1 => {
                 row.shelf_of().map(|p| QuickValue::flag(self.state.shows(p)))
             }
-            QuickRow::ResetSettings => self.reset_asked,
+            QuickRow::Controls
+            | QuickRow::ControlsButtons
+            | QuickRow::ControlsShortcuts
+            | QuickRow::PadConsole
+            | QuickRow::PadA
+            | QuickRow::PadB
+            | QuickRow::PadX
+            | QuickRow::PadY
+            | QuickRow::PadL1
+            | QuickRow::PadR1
+            | QuickRow::PadStart
+            | QuickRow::ScPage1
+            | QuickRow::ScPage2
+            | QuickRow::Sc0
+            | QuickRow::Sc1
+            | QuickRow::Sc2
+            | QuickRow::Sc3
+            | QuickRow::Sc4
+            | QuickRow::Sc5
+            | QuickRow::Sc6
+            | QuickRow::Sc7
+            | QuickRow::Sc8
+            | QuickRow::Sc9
+            | QuickRow::Sc10
+            | QuickRow::Sc11
+            | QuickRow::Sc12
+            | QuickRow::Sc13
+            | QuickRow::Sc14
+            | QuickRow::Sc15 => None,
+            QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 => self.reset_asked,
             QuickRow::GbOverlay | QuickRow::GbcOverlay | QuickRow::GbaOverlay | QuickRow::NesOverlay | QuickRow::SnesOverlay | QuickRow::Ps1Overlay | QuickRow::Wifi | QuickRow::CartArt | QuickRow::Achievements | QuickRow::Update | QuickRow::System | QuickRow::Library | QuickRow::DateTime | QuickRow::About | QuickRow::Screen | QuickRow::ScreenGb | QuickRow::ScreenGba | QuickRow::ScreenNes | QuickRow::ScreenSnes | QuickRow::ScreenPs1 | QuickRow::Game | QuickRow::Lights | QuickRow::LedMode | QuickRow::LedTop | QuickRow::LedButtons | QuickRow::LedTriggers | QuickRow::LedSticks | QuickRow::LedColor | QuickRow::LedEffect | QuickRow::Font | QuickRow::Online | QuickRow::Clock | QuickRow::Saving | QuickRow::LibrarySystems | QuickRow::AboutVersion | QuickRow::AboutBuild | QuickRow::AboutDevice | QuickRow::AboutFirmware | QuickRow::AboutCard | QuickRow::AboutLabel | QuickRow::SystemSounds | QuickRow::SoundVolume => None,
         }
     }
@@ -1510,6 +1553,198 @@ impl App {
         self.wifi.is_some()
     }
 
+    /// Which game button each physical button sends, console by console.
+    pub fn controls(&self) -> &crate::input::ButtonMaps {
+        &self.controls
+    }
+
+    pub fn set_controls(&mut self, controls: crate::input::ButtonMaps) {
+        self.controls = controls;
+    }
+
+    /// The shortcuts, and which version of them this is.
+    pub fn shortcuts(&self) -> &slot_input::Shortcuts {
+        &self.shortcuts
+    }
+
+    pub fn shortcuts_rev(&self) -> u32 {
+        self.shortcuts_rev
+    }
+
+    pub fn set_shortcuts(&mut self, shortcuts: slot_input::Shortcuts) {
+        self.shortcuts = shortcuts;
+        self.shortcuts_rev = self.shortcuts_rev.wrapping_add(1);
+    }
+
+    /// Controls is waiting for a new combo: the gestures report the next one pressed.
+    pub fn capturing_shortcut(&self) -> bool {
+        self.capturing.is_some()
+    }
+
+    fn save_shortcuts(&self) {
+        let Some(root) = &self.root else {
+            return;
+        };
+        if let Err(e) = crate::input::write_shortcuts(root, &self.shortcuts) {
+            eprintln!("slot: shortcuts.ini: {e}");
+        }
+    }
+
+    /// A shortcut row's row was opened: the next combo pressed is its new one.
+    fn start_capture(&mut self, row: QuickRow) {
+        if let Some(at) = row.sc_index().filter(|at| *at < self.shortcuts.list.len()) {
+            self.capturing = Some(at);
+        }
+    }
+
+    /// A combo came in for the shortcut being asked about. A shortcut already on it takes the
+    /// one this had, so no two are ever on the same combo.
+    fn capture_combo(&mut self, modifier: slot_input::Modifier, button: Btn) {
+        let Some(at) = self.capturing.take() else {
+            return;
+        };
+        let combo = Some((modifier, button));
+        if let Some(other) = self.shortcuts.list.iter().position(|s| s.combo == combo) {
+            if other != at {
+                self.shortcuts.list[other].combo = self.shortcuts.list[at].combo;
+            }
+        }
+        self.shortcuts.list[at].combo = combo;
+        self.shortcuts_rev = self.shortcuts_rev.wrapping_add(1);
+        self.save_shortcuts();
+    }
+
+    fn reset_shortcuts(&mut self) {
+        self.capturing = None;
+        self.set_shortcuts(slot_input::Shortcuts::standard(cfg!(feature = "brick")));
+        self.save_shortcuts();
+    }
+
+    /// What a shortcut row says: its combo, Off, or that a new one is awaited.
+    fn shortcut_text(&self, at: usize) -> &'static str {
+        if self.capturing == Some(at) {
+            return "Press the new combo";
+        }
+        const SELECT: [&str; 12] = ["SELECT + Up", "SELECT + Down", "SELECT + Left", "SELECT + Right", "SELECT + A", "SELECT + B", "SELECT + X", "SELECT + Y", "SELECT + L1", "SELECT + R1", "SELECT + L2", "SELECT + R2"];
+        const HOME: [&str; 12] = ["HOME + Up", "HOME + Down", "HOME + Left", "HOME + Right", "HOME + A", "HOME + B", "HOME + X", "HOME + Y", "HOME + L1", "HOME + R1", "HOME + L2", "HOME + R2"];
+        match self.shortcuts.list.get(at).map(|s| s.combo) {
+            None => "",
+            Some(None) => "Off",
+            Some(Some((modifier, button))) => {
+                let place = slot_input::BINDABLE.iter().position(|b| *b == button).unwrap_or(0);
+                match modifier {
+                    slot_input::Modifier::Select => SELECT[place],
+                    slot_input::Modifier::Home => HOME[place],
+                }
+            }
+        }
+    }
+
+    /// The console Button Remapping shows the buttons of.
+    fn controls_platform(&self) -> Platform {
+        Platform::ALL[self.controls_console % Platform::ALL.len()]
+    }
+
+    /// The physical button a Button Remapping row is for.
+    fn pad_button(row: QuickRow) -> Option<Btn> {
+        Some(match row {
+            QuickRow::PadA => Btn::A,
+            QuickRow::PadB => Btn::B,
+            QuickRow::PadX => Btn::X,
+            QuickRow::PadY => Btn::Y,
+            QuickRow::PadL1 => Btn::L1,
+            QuickRow::PadR1 => Btn::R1,
+            QuickRow::PadStart => Btn::Start,
+            _ => return None,
+        })
+    }
+
+    /// What a game button is called on the Controls page.
+    fn button_name(button: Btn) -> &'static str {
+        match button {
+            Btn::Up => "Up",
+            Btn::Down => "Down",
+            Btn::Left => "Left",
+            Btn::Right => "Right",
+            Btn::A => "A",
+            Btn::B => "B",
+            Btn::X => "X",
+            Btn::Y => "Y",
+            Btn::L1 => "L1",
+            Btn::R1 => "R1",
+            Btn::L2 => "L2",
+            Btn::R2 => "R2",
+            Btn::Start => "Start",
+            Btn::Select => "Select",
+            _ => "",
+        }
+    }
+
+    /// The game button `from` sends in a game of `platform`: none when it sends nothing a game
+    /// of that console has.
+    fn pad_sends(&self, platform: Platform, from: Btn) -> Option<Btn> {
+        self.controls
+            .target_of(platform, from)
+            .filter(|to| crate::input::ButtonMaps::choices(platform).contains(to))
+    }
+
+    /// What a Button Remapping row says: the console, or the game button its physical button
+    /// sends there (Off when it sends none).
+    fn pad_text(&self, slot: usize) -> &'static str {
+        let platform = self.controls_platform();
+        if slot == 0 {
+            return match platform {
+                Platform::Gba => "Game Boy Advance",
+                Platform::Gb => "Game Boy",
+                Platform::Gbc => "Game Boy Color",
+                Platform::Nes => "NES",
+                Platform::Snes => "SNES",
+                Platform::Ps1 => "PlayStation",
+            };
+        }
+        let Some(from) = QuickRow::PADS.get(slot).and_then(|row| Self::pad_button(*row)) else {
+            return "";
+        };
+        match self.pad_sends(platform, from) {
+            Some(to) => Self::button_name(to),
+            None => "Off",
+        }
+    }
+
+    fn step_controls_console(&mut self, right: bool) {
+        let n = Platform::ALL.len();
+        self.controls_console = (self.controls_console + if right { 1 } else { n - 1 }) % n;
+    }
+
+    /// The next or previous game button for a physical button: each one the console has, then Off.
+    fn step_pad(&mut self, row: QuickRow, right: bool) {
+        let Some(from) = Self::pad_button(row) else {
+            return;
+        };
+        let platform = self.controls_platform();
+        let mut options: Vec<Option<Btn>> = crate::input::ButtonMaps::choices(platform).iter().copied().map(Some).collect();
+        options.push(None);
+        let at = options.iter().position(|o| *o == self.pad_sends(platform, from)).unwrap_or(0);
+        let to = options[(at + if right { 1 } else { options.len() - 1 }) % options.len()];
+        self.controls.set_target(platform, from, to);
+        self.save_controls();
+    }
+
+    fn reset_controls(&mut self) {
+        let platform = self.controls_platform();
+        self.controls.reset(platform);
+        self.save_controls();
+    }
+
+    fn save_controls(&self) {
+        let Some(root) = &self.root else {
+            return;
+        };
+        if let Err(e) = self.controls.write(root) {
+            eprintln!("slot: controls.ini: {e}");
+        }
+    }
+
     fn quick_disabled(&self, row: QuickRow) -> bool {
         #[cfg(feature = "brick")]
         if matches!(row, QuickRow::CartArt | QuickRow::Achievements | QuickRow::Update) {
@@ -1659,6 +1894,8 @@ impl App {
             None if at == QuickRow::NAMED - 1 => {
                 PERCENTS[((self.state.sound_volume / slot_store::SOUND_VOLUME_STEP) as usize).min(PERCENTS.len() - 1)]
             }
+            None if at >= QuickRow::PAD_FIRST && at < QuickRow::SC_FIRST => self.pad_text(at - QuickRow::PAD_FIRST),
+            None if at >= QuickRow::SC_FIRST && at < QuickRow::NAMED - 1 => self.shortcut_text(at - QuickRow::SC_FIRST),
             None => self.about.get(at - Platform::ALL.len() - 1).map_or("", String::as_str),
         }
     }
@@ -2307,6 +2544,15 @@ impl App {
     /// a higher one as a value changes, higher still as something opens, and a lower one back.
     /// Only for a press that did something: a value that would not change is silent.
     fn quick_menu_input(&mut self, row: QuickRow, action: Action) {
+        // Waiting for a new combo: it is taken, or any other press (B, or HOME) gives it up.
+        if self.capturing.is_some() {
+            match action {
+                Action::Capture(modifier, button) => self.capture_combo(modifier, button),
+                Action::GbaDown(_) | Action::QuickMenu => self.capturing = None,
+                _ => {}
+            }
+            return;
+        }
         let (says, place) = (self.row_says(row), self.menu_place());
         self.quick_menu_step(row, action);
         let sound = match action {
@@ -2356,7 +2602,8 @@ impl App {
     fn quick_menu_step(&mut self, row: QuickRow, action: Action) {
         // Reset Settings asks once; any other press takes the question back.
         let pressed = matches!(action, Action::GbaDown(_) | Action::QuickMenu);
-        if pressed && !(row == QuickRow::ResetSettings && action == Action::GbaDown(Btn::A)) {
+        let resets = matches!(row, QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2);
+        if pressed && !(resets && action == Action::GbaDown(Btn::A)) {
             self.reset_asked = None;
         }
         let row = match action {
@@ -2377,6 +2624,11 @@ impl App {
                 }
                 return;
             }
+            // L1 and R1 turn between the two pages of Shortcuts.
+            Action::GbaDown(Btn::L1) | Action::GbaDown(Btn::R1) => match row.other_page() {
+                Some(other) => other,
+                None => return,
+            },
             _ => return,
         };
         self.phase = Phase::QuickMenu { row };
@@ -2409,6 +2661,48 @@ impl App {
             }
             QuickRow::AboutLabel => self.phase = Phase::About,
             QuickRow::AboutVersion | QuickRow::AboutBuild | QuickRow::AboutDevice | QuickRow::AboutFirmware | QuickRow::AboutCard => {}
+            QuickRow::Controls | QuickRow::ControlsButtons | QuickRow::ControlsShortcuts => {
+                if let Some(row) = row.child() {
+                    self.phase = Phase::QuickMenu { row };
+                }
+            }
+            QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 => match self.reset_asked {
+                None => self.reset_asked = Some(QuickValue::ResetAsk),
+                Some(QuickValue::ResetAsk) => {
+                    match row {
+                        QuickRow::PadReset => self.reset_controls(),
+                        _ => self.reset_shortcuts(),
+                    }
+                    self.reset_asked = Some(QuickValue::ResetDone);
+                }
+                Some(_) => {}
+            },
+            QuickRow::PadConsole
+            | QuickRow::PadA
+            | QuickRow::PadB
+            | QuickRow::PadX
+            | QuickRow::PadY
+            | QuickRow::PadL1
+            | QuickRow::PadR1
+            | QuickRow::PadStart
+            | QuickRow::ScPage1
+            | QuickRow::ScPage2 => {}
+            QuickRow::Sc0
+            | QuickRow::Sc1
+            | QuickRow::Sc2
+            | QuickRow::Sc3
+            | QuickRow::Sc4
+            | QuickRow::Sc5
+            | QuickRow::Sc6
+            | QuickRow::Sc7
+            | QuickRow::Sc8
+            | QuickRow::Sc9
+            | QuickRow::Sc10
+            | QuickRow::Sc11
+            | QuickRow::Sc12
+            | QuickRow::Sc13
+            | QuickRow::Sc14
+            | QuickRow::Sc15 => self.start_capture(row),
             QuickRow::ResetSettings => match self.reset_asked {
                 None => self.reset_asked = Some(QuickValue::ResetAsk),
                 Some(QuickValue::ResetAsk) => {
@@ -2553,6 +2847,42 @@ impl App {
                 s.ps1_dithering = !s.ps1_dithering;
                 self.ps1_dithering_changed = true;
             }
+            QuickRow::PadConsole => return self.step_controls_console(right),
+            QuickRow::PadA
+            | QuickRow::PadB
+            | QuickRow::PadX
+            | QuickRow::PadY
+            | QuickRow::PadL1
+            | QuickRow::PadR1
+            | QuickRow::PadStart => return self.step_pad(row, right),
+            QuickRow::ScPage1 | QuickRow::ScPage2 => {
+                if let Some(other) = row.other_page() {
+                    self.phase = Phase::QuickMenu { row: other };
+                }
+                return;
+            }
+            QuickRow::Controls
+            | QuickRow::ControlsButtons
+            | QuickRow::ControlsShortcuts
+            | QuickRow::PadReset
+            | QuickRow::ScReset1
+            | QuickRow::ScReset2
+            | QuickRow::Sc0
+            | QuickRow::Sc1
+            | QuickRow::Sc2
+            | QuickRow::Sc3
+            | QuickRow::Sc4
+            | QuickRow::Sc5
+            | QuickRow::Sc6
+            | QuickRow::Sc7
+            | QuickRow::Sc8
+            | QuickRow::Sc9
+            | QuickRow::Sc10
+            | QuickRow::Sc11
+            | QuickRow::Sc12
+            | QuickRow::Sc13
+            | QuickRow::Sc14
+            | QuickRow::Sc15 => return,
             QuickRow::Rumble => s.rumble = !s.rumble,
             QuickRow::SoundMenu => s.menu_sounds = !s.menu_sounds,
             QuickRow::SoundStar => s.sound_star = !s.sound_star,

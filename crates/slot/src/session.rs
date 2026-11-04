@@ -24,8 +24,8 @@ pub struct Session {
     sink: Box<dyn AudioSink>,
     gestures: Gestures,
     pad: Pad,
-    /// Which game button each physical button sends, from Config/controls.ini.
-    controls: ButtonMaps,
+    /// Which version of the shortcuts the gestures have, against the app's.
+    shortcuts_rev: u32,
     rewinding: bool,
     fast: bool,
     motor: u16,
@@ -48,7 +48,12 @@ impl Session {
             }
         }
         Session {
-            app: App::take_booted(&root),
+            app: {
+                let mut app = App::take_booted(&root);
+                app.set_controls(controls.clone());
+                app.set_shortcuts(shortcuts.clone());
+                app
+            },
             root,
             emu: None,
             sink,
@@ -59,7 +64,7 @@ impl Session {
             },
             prefetch: Prefetch::default(),
             pad: Pad::default(),
-            controls,
+            shortcuts_rev: 0,
             rewinding: false,
             fast: false,
             motor: 0,
@@ -168,6 +173,11 @@ impl Session {
     pub fn feed(&mut self, events: impl IntoIterator<Item = RawEvent>, now: Millis) {
         self.gestures
             .set_triggers_to_game(self.has_core() && self.app.platform() == Platform::Ps1);
+        self.gestures.set_capture(self.app.capturing_shortcut());
+        if self.app.shortcuts_rev() != self.shortcuts_rev {
+            self.shortcuts_rev = self.app.shortcuts_rev();
+            self.gestures.set_shortcuts(self.app.shortcuts().clone());
+        }
         let mut actions = Vec::new();
         for ev in events {
             actions.extend(self.gestures.feed(ev, now));
@@ -206,7 +216,7 @@ impl Session {
             self.pad.apply(Action::GbaUp(*btn));
         }
         if let Some(emu) = &self.emu {
-            emu.set_input(self.pad.mask_with(self.controls.for_platform(self.app.platform())));
+            emu.set_input(self.pad.mask_with(self.app.controls().for_platform(self.app.platform())));
         }
     }
 

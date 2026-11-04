@@ -130,3 +130,110 @@ pub fn write_shortcuts(root: &Path, shortcuts: &slot_input::Shortcuts) -> std::i
     std::fs::write(&temp, shortcuts.to_text())?;
     std::fs::rename(temp, dir.join("shortcuts.ini"))
 }
+
+impl ButtonMaps {
+    /// The game buttons a game of `platform` has, in the order Button Remapping steps through.
+    pub fn choices(platform: Platform) -> &'static [Btn] {
+        match platform {
+            Platform::Gba => &[
+                Btn::A,
+                Btn::B,
+                Btn::L1,
+                Btn::R1,
+                Btn::Start,
+                Btn::Select,
+                Btn::Up,
+                Btn::Down,
+                Btn::Left,
+                Btn::Right,
+            ],
+            Platform::Gb | Platform::Gbc | Platform::Nes => &[
+                Btn::A,
+                Btn::B,
+                Btn::Start,
+                Btn::Select,
+                Btn::Up,
+                Btn::Down,
+                Btn::Left,
+                Btn::Right,
+            ],
+            Platform::Snes => &[
+                Btn::A,
+                Btn::B,
+                Btn::X,
+                Btn::Y,
+                Btn::L1,
+                Btn::R1,
+                Btn::Start,
+                Btn::Select,
+                Btn::Up,
+                Btn::Down,
+                Btn::Left,
+                Btn::Right,
+            ],
+            Platform::Ps1 => &[
+                Btn::A,
+                Btn::B,
+                Btn::X,
+                Btn::Y,
+                Btn::L1,
+                Btn::R1,
+                Btn::L2,
+                Btn::R2,
+                Btn::Start,
+                Btn::Select,
+                Btn::Up,
+                Btn::Down,
+                Btn::Left,
+                Btn::Right,
+            ],
+        }
+    }
+
+    /// What the physical button `from` sends in a game of `platform`: itself unless listed,
+    /// and none for a button set to send nothing.
+    pub fn target_of(&self, platform: Platform, from: Btn) -> Option<Btn> {
+        match self.maps[platform.index()].iter().find(|(f, _)| *f == from) {
+            Some((_, to)) => *to,
+            None => Some(from),
+        }
+    }
+
+    /// Sets what `from` sends in a game of `platform`; sending itself is the same as no line.
+    pub fn set_target(&mut self, platform: Platform, from: Btn, to: Option<Btn>) {
+        let remap = &mut self.maps[platform.index()];
+        remap.retain(|(f, _)| *f != from);
+        if to != Some(from) {
+            remap.push((from, to));
+        }
+    }
+
+    /// Every button of `platform` sending itself again.
+    pub fn reset(&mut self, platform: Platform) {
+        self.maps[platform.index()].clear();
+    }
+
+    /// Writes `Config/controls.ini`, a console to a line, through a temporary file.
+    pub fn write(&self, root: &Path) -> std::io::Result<()> {
+        let mut text = String::new();
+        for platform in Platform::ALL {
+            let remap = &self.maps[platform.index()];
+            if remap.is_empty() {
+                continue;
+            }
+            let pairs: Vec<String> = remap
+                .iter()
+                .map(|(from, to)| match to {
+                    Some(to) => format!("{from:?}:{to:?}"),
+                    None => format!("{from:?}:None"),
+                })
+                .collect();
+            text.push_str(&format!("{}={}\n", platform_key(platform), pairs.join(",")));
+        }
+        let dir = root.join("Config");
+        std::fs::create_dir_all(&dir)?;
+        let temp = dir.join("controls.ini.tmp");
+        std::fs::write(&temp, text)?;
+        std::fs::rename(temp, dir.join("controls.ini"))
+    }
+}

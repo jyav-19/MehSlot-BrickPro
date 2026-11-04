@@ -90,10 +90,42 @@ pub enum QuickRow {
     SoundLabel,
     SoundVolume,
     UpdateCheck,
+    Controls,
+    ControlsButtons,
+    ControlsShortcuts,
+    PadConsole,
+    PadA,
+    PadB,
+    PadX,
+    PadY,
+    PadL1,
+    PadR1,
+    PadStart,
+    PadReset,
+    ScPage1,
+    Sc0,
+    Sc1,
+    Sc2,
+    Sc3,
+    Sc4,
+    Sc5,
+    Sc6,
+    Sc7,
+    ScReset1,
+    ScPage2,
+    Sc8,
+    Sc9,
+    Sc10,
+    Sc11,
+    Sc12,
+    Sc13,
+    Sc14,
+    Sc15,
+    ScReset2,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 77] = [
+    pub const ALL: [QuickRow; 109] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -171,15 +203,47 @@ impl QuickRow {
         QuickRow::SoundLabel,
         QuickRow::SoundVolume,
         QuickRow::UpdateCheck,
+        QuickRow::Controls,
+        QuickRow::ControlsButtons,
+        QuickRow::ControlsShortcuts,
+        QuickRow::PadConsole,
+        QuickRow::PadA,
+        QuickRow::PadB,
+        QuickRow::PadX,
+        QuickRow::PadY,
+        QuickRow::PadL1,
+        QuickRow::PadR1,
+        QuickRow::PadStart,
+        QuickRow::PadReset,
+        QuickRow::ScPage1,
+        QuickRow::Sc0,
+        QuickRow::Sc1,
+        QuickRow::Sc2,
+        QuickRow::Sc3,
+        QuickRow::Sc4,
+        QuickRow::Sc5,
+        QuickRow::Sc6,
+        QuickRow::Sc7,
+        QuickRow::ScReset1,
+        QuickRow::ScPage2,
+        QuickRow::Sc8,
+        QuickRow::Sc9,
+        QuickRow::Sc10,
+        QuickRow::Sc11,
+        QuickRow::Sc12,
+        QuickRow::Sc13,
+        QuickRow::Sc14,
+        QuickRow::Sc15,
+        QuickRow::ScReset2,
     ];
 
     #[cfg(not(feature = "brick"))]
-    pub const MAIN: [QuickRow; 4] = [QuickRow::Screen, QuickRow::Game, QuickRow::Library, QuickRow::System];
+    pub const MAIN: [QuickRow; 5] = [QuickRow::Screen, QuickRow::Game, QuickRow::Controls, QuickRow::Library, QuickRow::System];
     #[cfg(not(feature = "brick"))]
     pub const SYSTEM: [QuickRow; 7] = [QuickRow::DateTime, QuickRow::Font, QuickRow::Rumble, QuickRow::SystemSounds, QuickRow::BatteryShutdown, QuickRow::ResetSettings, QuickRow::About];
 
     #[cfg(feature = "brick")]
-    pub const MAIN: [QuickRow; 5] = [QuickRow::Screen,QuickRow::Game,QuickRow::Library,QuickRow::Online,QuickRow::System];
+    pub const MAIN: [QuickRow; 6] = [QuickRow::Screen,QuickRow::Game,QuickRow::Controls,QuickRow::Library,QuickRow::Online,QuickRow::System];
     /// System: the Brick's lights, its clock, the font, rumble, Slot's sounds, the battery,
     /// asking GitHub for a newer Slot, every setting back to how it came, and what Slot is.
     #[cfg(feature = "brick")]
@@ -215,6 +279,75 @@ impl QuickRow {
     /// Library → Systems: each system's shelf shown or hidden, in the shelves' order.
     pub const SYSTEMS: [QuickRow; 6] =
         [QuickRow::ShowGba, QuickRow::ShowGb, QuickRow::ShowGbc, QuickRow::ShowNes, QuickRow::ShowSnes, QuickRow::ShowPs1];
+    /// Controls: its two pages.
+    pub const CONTROLS_MENU: [QuickRow; 2] = [QuickRow::ControlsButtons, QuickRow::ControlsShortcuts];
+    /// Controls → Button Remapping: the console, then what each button sends there.
+    pub const PAD_PAGE: [QuickRow; 9] = [
+        QuickRow::PadConsole,
+        QuickRow::PadA,
+        QuickRow::PadB,
+        QuickRow::PadX,
+        QuickRow::PadY,
+        QuickRow::PadL1,
+        QuickRow::PadR1,
+        QuickRow::PadStart,
+        QuickRow::PadReset,
+    ];
+    /// The Button Remapping rows that read a name: the console's, then each button's.
+    pub const PADS: [QuickRow; 8] = [
+        QuickRow::PadConsole,
+        QuickRow::PadA,
+        QuickRow::PadB,
+        QuickRow::PadX,
+        QuickRow::PadY,
+        QuickRow::PadL1,
+        QuickRow::PadR1,
+        QuickRow::PadStart,
+    ];
+    /// Controls → Shortcuts: two pages, which L1 and R1 turn between.
+    pub const SC_PAGE_1: [QuickRow; 10] = [
+        QuickRow::ScPage1,
+        QuickRow::Sc0,
+        QuickRow::Sc1,
+        QuickRow::Sc2,
+        QuickRow::Sc3,
+        QuickRow::Sc4,
+        QuickRow::Sc5,
+        QuickRow::Sc6,
+        QuickRow::Sc7,
+        QuickRow::ScReset1,
+    ];
+    pub const SC_PAGE_2: [QuickRow; 10] = [
+        QuickRow::ScPage2,
+        QuickRow::Sc8,
+        QuickRow::Sc9,
+        QuickRow::Sc10,
+        QuickRow::Sc11,
+        QuickRow::Sc12,
+        QuickRow::Sc13,
+        QuickRow::Sc14,
+        QuickRow::Sc15,
+        QuickRow::ScReset2,
+    ];
+    /// The shortcut rows, in the order of `slot_input::SHORTCUT_KEYS`.
+    pub const SCS: [QuickRow; 16] = [
+        QuickRow::Sc0,
+        QuickRow::Sc1,
+        QuickRow::Sc2,
+        QuickRow::Sc3,
+        QuickRow::Sc4,
+        QuickRow::Sc5,
+        QuickRow::Sc6,
+        QuickRow::Sc7,
+        QuickRow::Sc8,
+        QuickRow::Sc9,
+        QuickRow::Sc10,
+        QuickRow::Sc11,
+        QuickRow::Sc12,
+        QuickRow::Sc13,
+        QuickRow::Sc14,
+        QuickRow::Sc15,
+    ];
     /// Gameplay → Saving: when a game is saved without being asked.
     pub const SAVING: [QuickRow; 2] = [QuickRow::AutoSave, QuickRow::EjectSave];
 
@@ -248,13 +381,34 @@ impl QuickRow {
     /// Rows that read a name rather than a fixed value (an overlay's, the font's, About's, the
     /// sounds' volume), numbered: the overlay rows by their platform, then Font, then About's,
     /// then Volume.
-    pub const NAMED: usize = slot_store::Platform::ALL.len() + 1 + Self::ABOUT_INFO.len() + 1;
+    /// Where the Button Remapping rows' names start among the named rows: after About's.
+    pub const PAD_FIRST: usize = slot_store::Platform::ALL.len() + 1 + Self::ABOUT_INFO.len();
+    /// Where the shortcut rows' combos start: after the Button Remapping names.
+    pub const SC_FIRST: usize = Self::PAD_FIRST + Self::PADS.len();
+    pub const NAMED: usize = Self::SC_FIRST + Self::SCS.len() + 1;
+    /// A Button Remapping row's place among those that read a name.
+    pub fn pad_slot(self) -> Option<usize> {
+        Self::PADS.iter().position(|r| *r == self)
+    }
+    /// A shortcut row's place among the shortcuts.
+    pub fn sc_index(self) -> Option<usize> {
+        Self::SCS.iter().position(|r| *r == self)
+    }
+    /// The same place on the other page of Shortcuts, which L1 and R1 go to.
+    pub fn other_page(self) -> Option<QuickRow> {
+        if let Some(at) = Self::SC_PAGE_1.iter().position(|r| *r == self) {
+            return Some(Self::SC_PAGE_2[at]);
+        }
+        Self::SC_PAGE_2.iter().position(|r| *r == self).map(|at| Self::SC_PAGE_1[at])
+    }
     pub fn named(self) -> Option<usize> {
         let about = slot_store::Platform::ALL.len() + 1;
         match self {
             QuickRow::Font => Some(slot_store::Platform::ALL.len()),
             QuickRow::SoundVolume => Some(Self::NAMED - 1),
             row if row.info() => Self::ABOUT_INFO.iter().position(|r| *r == row).map(|at| about + at),
+            row if row.pad_slot().is_some() => row.pad_slot().map(|at| Self::PAD_FIRST + at),
+            row if row.sc_index().is_some() => row.sc_index().map(|at| Self::SC_FIRST + at),
             _ => self.overlay_of().map(|p| p.index()),
         }
     }
@@ -351,6 +505,37 @@ impl QuickRow {
             | QuickRow::LibraryPlayTime
             | QuickRow::LibraryTitleCard => &QuickRow::LIBRARY,
             QuickRow::Wifi | QuickRow::CartArt | QuickRow::Achievements | QuickRow::Update => &QuickRow::ONLINE,
+            QuickRow::ControlsButtons
+            | QuickRow::ControlsShortcuts => &QuickRow::CONTROLS_MENU,
+            QuickRow::PadConsole
+            | QuickRow::PadA
+            | QuickRow::PadB
+            | QuickRow::PadX
+            | QuickRow::PadY
+            | QuickRow::PadL1
+            | QuickRow::PadR1
+            | QuickRow::PadStart
+            | QuickRow::PadReset => &QuickRow::PAD_PAGE,
+            QuickRow::ScPage1
+            | QuickRow::Sc0
+            | QuickRow::Sc1
+            | QuickRow::Sc2
+            | QuickRow::Sc3
+            | QuickRow::Sc4
+            | QuickRow::Sc5
+            | QuickRow::Sc6
+            | QuickRow::Sc7
+            | QuickRow::ScReset1 => &QuickRow::SC_PAGE_1,
+            QuickRow::ScPage2
+            | QuickRow::Sc8
+            | QuickRow::Sc9
+            | QuickRow::Sc10
+            | QuickRow::Sc11
+            | QuickRow::Sc12
+            | QuickRow::Sc13
+            | QuickRow::Sc14
+            | QuickRow::Sc15
+            | QuickRow::ScReset2 => &QuickRow::SC_PAGE_2,
             _ => &QuickRow::MAIN,
         }
     }
@@ -364,6 +549,9 @@ impl QuickRow {
             QuickRow::NesShader => Some(QuickRow::ScreenNes),
             QuickRow::SnesShader => Some(QuickRow::ScreenSnes),
             QuickRow::Ps1Shader => Some(QuickRow::ScreenPs1),
+            QuickRow::ControlsButtons => Some(QuickRow::Controls),
+            QuickRow::PadConsole => Some(QuickRow::ControlsButtons),
+            QuickRow::ScPage1 | QuickRow::ScPage2 => Some(QuickRow::ControlsShortcuts),
             QuickRow::FastForward => Some(QuickRow::Game),
             QuickRow::LibrarySort => Some(QuickRow::Library),
             QuickRow::ShowGba => Some(QuickRow::LibrarySystems),
@@ -396,6 +584,9 @@ impl QuickRow {
             QuickRow::Online => Some(QuickRow::ONLINE[0]),
             QuickRow::Clock => Some(QuickRow::CLOCK[0]),
             QuickRow::Saving => Some(QuickRow::SAVING[0]),
+            QuickRow::Controls => Some(QuickRow::CONTROLS_MENU[0]),
+            QuickRow::ControlsButtons => Some(QuickRow::PAD_PAGE[0]),
+            QuickRow::ControlsShortcuts => Some(QuickRow::SC_PAGE_1[1]),
             _ => None,
         }
     }
@@ -475,6 +666,37 @@ impl QuickRow {
             QuickRow::Turbo => "Turbo Buttons",
             QuickRow::Rewind => "Rewind",
             QuickRow::GbPalettes => "GB Palettes",
+            QuickRow::Controls => "Controls",
+            QuickRow::ControlsButtons => "Button Remapping",
+            QuickRow::ControlsShortcuts => "Shortcuts",
+            QuickRow::PadConsole => "Console",
+            QuickRow::PadA => "A",
+            QuickRow::PadB => "B",
+            QuickRow::PadX => "X",
+            QuickRow::PadY => "Y",
+            QuickRow::PadL1 => "L1",
+            QuickRow::PadR1 => "R1",
+            QuickRow::PadStart => "Start",
+            QuickRow::PadReset => "Reset to Defaults",
+            QuickRow::ScPage1 => "Page 1 of 2   (L / R)",
+            QuickRow::ScPage2 => "Page 2 of 2   (L / R)",
+            QuickRow::Sc0 => "Brightness Up",
+            QuickRow::Sc1 => "Brightness Down",
+            QuickRow::Sc2 => "Blue Light Down",
+            QuickRow::Sc3 => "Blue Light Up",
+            QuickRow::Sc4 => "Load State",
+            QuickRow::Sc5 => "Save State",
+            QuickRow::Sc6 => "Colour Correction",
+            QuickRow::Sc7 => "Palette Previous",
+            QuickRow::Sc8 => "Palette Next",
+            QuickRow::Sc9 => "Next Shader",
+            QuickRow::Sc10 => "Previous Shader",
+            QuickRow::Sc11 => "Next Shader (HOME)",
+            QuickRow::Sc12 => "Toggle LEDs",
+            QuickRow::Sc13 => "Overlay Previous",
+            QuickRow::Sc14 => "Overlay Next",
+            QuickRow::Sc15 => "Screen Mode",
+            QuickRow::ScReset1 | QuickRow::ScReset2 => "Reset to Defaults",
         }
     }
 
@@ -485,6 +707,28 @@ impl QuickRow {
                 | QuickRow::LibrarySystems | QuickRow::ResetSettings | QuickRow::AboutLabel | QuickRow::SystemSounds
                 | QuickRow::Online | QuickRow::Clock | QuickRow::Saving
                 | QuickRow::ScreenGb | QuickRow::ScreenGba | QuickRow::ScreenNes | QuickRow::ScreenSnes | QuickRow::ScreenPs1
+                | QuickRow::Controls
+                | QuickRow::ControlsButtons
+                | QuickRow::ControlsShortcuts
+                | QuickRow::PadReset
+                | QuickRow::ScReset1
+                | QuickRow::ScReset2
+                | QuickRow::Sc0
+                | QuickRow::Sc1
+                | QuickRow::Sc2
+                | QuickRow::Sc3
+                | QuickRow::Sc4
+                | QuickRow::Sc5
+                | QuickRow::Sc6
+                | QuickRow::Sc7
+                | QuickRow::Sc8
+                | QuickRow::Sc9
+                | QuickRow::Sc10
+                | QuickRow::Sc11
+                | QuickRow::Sc12
+                | QuickRow::Sc13
+                | QuickRow::Sc14
+                | QuickRow::Sc15
         )
     }
 
@@ -850,7 +1094,7 @@ impl QuickMenu<'_> {
         }
         let [back, change, open, reset] = faces.legend;
         let other = match self.row {
-            QuickRow::ResetSettings => reset,
+            QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 => reset,
             row if row.opens() => open,
             _ => change,
         };
