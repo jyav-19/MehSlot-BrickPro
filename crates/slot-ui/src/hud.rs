@@ -7,7 +7,7 @@ use crate::{Badge, Icon, Toast};
 
 pub type Millis = u64;
 
-pub const HUD_MS: Millis = 1500;
+pub const HUD_MS: Millis = 2000;
 const FADE_MS: Millis = 250;
 const PULSE_MS: Millis = 500;
 

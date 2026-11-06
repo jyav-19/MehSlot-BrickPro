@@ -71,7 +71,7 @@ const POWER_MENU_BAR_INSET: f32 = 4.0;
 const CORE_PICKER_RECEDE: f32 = 0.26;
 
 const SLOT_NAME_IN_MS: Millis = 200;
-const SLOT_NAME_HOLD_MS: Millis = 1200;
+const SLOT_NAME_HOLD_MS: Millis = 1000;
 const SLOT_NAME_OUT_MS: Millis = 800;
 const SLOT_NAME_ALPHA: f32 = 0.4;
 /// How long the slot takes to turn from a cartridge slot into a disc slot, or back.
@@ -500,7 +500,7 @@ pub struct FaceWant {
 }
 
 /// How long a toast stays up, and how long it takes to slide in and out.
-const BANNER_MS: Millis = 4500;
+const BANNER_MS: Millis = 2000;
 const BANNER_SLIDE: Millis = 300;
 /// The longest a toast waits for its badge to download.
 const BADGE_WAIT: Millis = 1500;
@@ -1338,6 +1338,7 @@ impl App {
             | QuickRow::PadStart
             | QuickRow::ScPage1
             | QuickRow::ScPage2
+            | QuickRow::ScPage3
             | QuickRow::Sc0
             | QuickRow::Sc1
             | QuickRow::Sc2
@@ -1354,7 +1355,7 @@ impl App {
             | QuickRow::Sc13
             | QuickRow::Sc14
             | QuickRow::Sc15 => None,
-            QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 => self.reset_asked,
+            QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 | QuickRow::ScReset3 => self.reset_asked,
             QuickRow::GbOverlay | QuickRow::GbcOverlay | QuickRow::GbaOverlay | QuickRow::NesOverlay | QuickRow::SnesOverlay | QuickRow::Ps1Overlay | QuickRow::Wifi | QuickRow::CartArt | QuickRow::Achievements | QuickRow::Update | QuickRow::System | QuickRow::Library | QuickRow::DateTime | QuickRow::About | QuickRow::Screen | QuickRow::ScreenGb | QuickRow::ScreenGba | QuickRow::ScreenNes | QuickRow::ScreenSnes | QuickRow::ScreenPs1 | QuickRow::Game | QuickRow::Lights | QuickRow::LedMode | QuickRow::LedTop | QuickRow::LedButtons | QuickRow::LedTriggers | QuickRow::LedSticks | QuickRow::LedColor | QuickRow::LedEffect | QuickRow::Font | QuickRow::Online | QuickRow::Clock | QuickRow::Saving | QuickRow::LibrarySystems | QuickRow::AboutVersion | QuickRow::AboutBuild | QuickRow::AboutDevice | QuickRow::AboutFirmware | QuickRow::AboutCard | QuickRow::AboutLabel | QuickRow::SystemSounds | QuickRow::SoundVolume => None,
         }
     }
@@ -2602,7 +2603,7 @@ impl App {
     fn quick_menu_step(&mut self, row: QuickRow, action: Action) {
         // Reset Settings asks once; any other press takes the question back.
         let pressed = matches!(action, Action::GbaDown(_) | Action::QuickMenu);
-        let resets = matches!(row, QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2);
+        let resets = matches!(row, QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 | QuickRow::ScReset3);
         if pressed && !(resets && action == Action::GbaDown(Btn::A)) {
             self.reset_asked = None;
         }
@@ -2624,8 +2625,12 @@ impl App {
                 }
                 return;
             }
-            // L1 and R1 turn between the two pages of Shortcuts.
-            Action::GbaDown(Btn::L1) | Action::GbaDown(Btn::R1) => match row.other_page() {
+            // L1 and R1 turn round the pages of Shortcuts.
+            Action::GbaDown(Btn::L1) => match row.turn_page(false) {
+                Some(other) => other,
+                None => return,
+            },
+            Action::GbaDown(Btn::R1) => match row.turn_page(true) {
                 Some(other) => other,
                 None => return,
             },
@@ -2666,7 +2671,7 @@ impl App {
                     self.phase = Phase::QuickMenu { row };
                 }
             }
-            QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 => match self.reset_asked {
+            QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 | QuickRow::ScReset3 => match self.reset_asked {
                 None => self.reset_asked = Some(QuickValue::ResetAsk),
                 Some(QuickValue::ResetAsk) => {
                     match row {
@@ -2686,7 +2691,8 @@ impl App {
             | QuickRow::PadR1
             | QuickRow::PadStart
             | QuickRow::ScPage1
-            | QuickRow::ScPage2 => {}
+            | QuickRow::ScPage2
+            | QuickRow::ScPage3 => {}
             QuickRow::Sc0
             | QuickRow::Sc1
             | QuickRow::Sc2
@@ -2855,8 +2861,8 @@ impl App {
             | QuickRow::PadL1
             | QuickRow::PadR1
             | QuickRow::PadStart => return self.step_pad(row, right),
-            QuickRow::ScPage1 | QuickRow::ScPage2 => {
-                if let Some(other) = row.other_page() {
+            QuickRow::ScPage1 | QuickRow::ScPage2 | QuickRow::ScPage3 => {
+                if let Some(other) = row.turn_page(right) {
                     self.phase = Phase::QuickMenu { row: other };
                 }
                 return;
@@ -2867,6 +2873,7 @@ impl App {
             | QuickRow::PadReset
             | QuickRow::ScReset1
             | QuickRow::ScReset2
+            | QuickRow::ScReset3
             | QuickRow::Sc0
             | QuickRow::Sc1
             | QuickRow::Sc2

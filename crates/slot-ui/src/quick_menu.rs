@@ -122,10 +122,12 @@ pub enum QuickRow {
     Sc14,
     Sc15,
     ScReset2,
+    ScPage3,
+    ScReset3,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 109] = [
+    pub const ALL: [QuickRow; 111] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -235,6 +237,8 @@ impl QuickRow {
         QuickRow::Sc14,
         QuickRow::Sc15,
         QuickRow::ScReset2,
+        QuickRow::ScPage3,
+        QuickRow::ScReset3,
     ];
 
     #[cfg(not(feature = "brick"))]
@@ -304,8 +308,8 @@ impl QuickRow {
         QuickRow::PadR1,
         QuickRow::PadStart,
     ];
-    /// Controls → Shortcuts: two pages, which L1 and R1 turn between.
-    pub const SC_PAGE_1: [QuickRow; 10] = [
+    /// Controls → Shortcuts: three pages, which L1 and R1 turn between.
+    pub const SC_PAGE_1: [QuickRow; 8] = [
         QuickRow::ScPage1,
         QuickRow::Sc0,
         QuickRow::Sc1,
@@ -313,21 +317,25 @@ impl QuickRow {
         QuickRow::Sc3,
         QuickRow::Sc4,
         QuickRow::Sc5,
-        QuickRow::Sc6,
-        QuickRow::Sc7,
         QuickRow::ScReset1,
     ];
-    pub const SC_PAGE_2: [QuickRow; 10] = [
+    pub const SC_PAGE_2: [QuickRow; 7] = [
         QuickRow::ScPage2,
+        QuickRow::Sc6,
+        QuickRow::Sc7,
         QuickRow::Sc8,
         QuickRow::Sc9,
         QuickRow::Sc10,
+        QuickRow::ScReset2,
+    ];
+    pub const SC_PAGE_3: [QuickRow; 7] = [
+        QuickRow::ScPage3,
         QuickRow::Sc11,
         QuickRow::Sc12,
         QuickRow::Sc13,
         QuickRow::Sc14,
         QuickRow::Sc15,
-        QuickRow::ScReset2,
+        QuickRow::ScReset3,
     ];
     /// The shortcut rows, in the order of `slot_input::SHORTCUT_KEYS`.
     pub const SCS: [QuickRow; 16] = [
@@ -394,12 +402,16 @@ impl QuickRow {
     pub fn sc_index(self) -> Option<usize> {
         Self::SCS.iter().position(|r| *r == self)
     }
-    /// The same place on the other page of Shortcuts, which L1 and R1 go to.
-    pub fn other_page(self) -> Option<QuickRow> {
-        if let Some(at) = Self::SC_PAGE_1.iter().position(|r| *r == self) {
-            return Some(Self::SC_PAGE_2[at]);
-        }
-        Self::SC_PAGE_2.iter().position(|r| *r == self).map(|at| Self::SC_PAGE_1[at])
+    /// The same place on the next (or previous) page of Shortcuts, which R1 and L1 go to: the
+    /// pages go round. They differ in length, so a place is kept as far as the page reaches,
+    /// and the last line (Reset) stays the last line.
+    pub fn turn_page(self, forward: bool) -> Option<QuickRow> {
+        let pages = [&Self::SC_PAGE_1[..], &Self::SC_PAGE_2[..], &Self::SC_PAGE_3[..]];
+        let from = pages.iter().position(|page| page.contains(&self))?;
+        let at = pages[from].iter().position(|r| *r == self)?;
+        let to = pages[(from + if forward { 1 } else { pages.len() - 1 }) % pages.len()];
+        let place = if at + 1 == pages[from].len() { to.len() - 1 } else { at.min(to.len() - 2) };
+        Some(to[place])
     }
     pub fn named(self) -> Option<usize> {
         let about = slot_store::Platform::ALL.len() + 1;
@@ -523,19 +535,21 @@ impl QuickRow {
             | QuickRow::Sc3
             | QuickRow::Sc4
             | QuickRow::Sc5
-            | QuickRow::Sc6
-            | QuickRow::Sc7
             | QuickRow::ScReset1 => &QuickRow::SC_PAGE_1,
             QuickRow::ScPage2
+            | QuickRow::Sc6
+            | QuickRow::Sc7
             | QuickRow::Sc8
             | QuickRow::Sc9
             | QuickRow::Sc10
+            | QuickRow::ScReset2 => &QuickRow::SC_PAGE_2,
+            QuickRow::ScPage3
             | QuickRow::Sc11
             | QuickRow::Sc12
             | QuickRow::Sc13
             | QuickRow::Sc14
             | QuickRow::Sc15
-            | QuickRow::ScReset2 => &QuickRow::SC_PAGE_2,
+            | QuickRow::ScReset3 => &QuickRow::SC_PAGE_3,
             _ => &QuickRow::MAIN,
         }
     }
@@ -551,7 +565,7 @@ impl QuickRow {
             QuickRow::Ps1Shader => Some(QuickRow::ScreenPs1),
             QuickRow::ControlsButtons => Some(QuickRow::Controls),
             QuickRow::PadConsole => Some(QuickRow::ControlsButtons),
-            QuickRow::ScPage1 | QuickRow::ScPage2 => Some(QuickRow::ControlsShortcuts),
+            QuickRow::ScPage1 | QuickRow::ScPage2 | QuickRow::ScPage3 => Some(QuickRow::ControlsShortcuts),
             QuickRow::FastForward => Some(QuickRow::Game),
             QuickRow::LibrarySort => Some(QuickRow::Library),
             QuickRow::ShowGba => Some(QuickRow::LibrarySystems),
@@ -678,8 +692,9 @@ impl QuickRow {
             QuickRow::PadR1 => "R1",
             QuickRow::PadStart => "Start",
             QuickRow::PadReset => "Reset to Defaults",
-            QuickRow::ScPage1 => "Page 1 of 2   (L / R)",
-            QuickRow::ScPage2 => "Page 2 of 2   (L / R)",
+            QuickRow::ScPage1 => "Page 1 of 3   (L / R)",
+            QuickRow::ScPage2 => "Page 2 of 3   (L / R)",
+            QuickRow::ScPage3 => "Page 3 of 3   (L / R)",
             QuickRow::Sc0 => "Brightness Up",
             QuickRow::Sc1 => "Brightness Down",
             QuickRow::Sc2 => "Blue Light Down",
@@ -696,7 +711,7 @@ impl QuickRow {
             QuickRow::Sc13 => "Overlay Previous",
             QuickRow::Sc14 => "Overlay Next",
             QuickRow::Sc15 => "Screen Mode",
-            QuickRow::ScReset1 | QuickRow::ScReset2 => "Reset to Defaults",
+            QuickRow::ScReset1 | QuickRow::ScReset2 | QuickRow::ScReset3 => "Reset to Defaults",
         }
     }
 
@@ -713,6 +728,7 @@ impl QuickRow {
                 | QuickRow::PadReset
                 | QuickRow::ScReset1
                 | QuickRow::ScReset2
+                | QuickRow::ScReset3
                 | QuickRow::Sc0
                 | QuickRow::Sc1
                 | QuickRow::Sc2
@@ -1094,7 +1110,7 @@ impl QuickMenu<'_> {
         }
         let [back, change, open, reset] = faces.legend;
         let other = match self.row {
-            QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 => reset,
+            QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 | QuickRow::ScReset3 => reset,
             row if row.opens() => open,
             _ => change,
         };
