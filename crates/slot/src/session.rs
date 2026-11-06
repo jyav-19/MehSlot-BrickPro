@@ -7,6 +7,9 @@ use slot_store::Platform;
 use slot_ui::FfState;
 
 pub const RUMBLE_HOLD_MS: Millis = 100;
+/// The buzz as the Fn switch goes on: how long, and how hard.
+const BUZZ_MS: Millis = 220;
+const BUZZ_STRENGTH: u16 = 0xC000;
 
 use crate::app::{App, Phase};
 use crate::audio::{AudioSink, Ring, Sfx};
@@ -29,6 +32,8 @@ pub struct Session {
     rewinding: bool,
     fast: bool,
     motor: u16,
+    /// When the buzz asked for by the Fn switch is over.
+    buzz_until: Millis,
     pulse: Option<(Millis, u16)>,
     reloading: bool,
     driven: bool,
@@ -51,6 +56,7 @@ impl Session {
             app: {
                 let mut app = App::take_booted(&root);
                 app.set_controls(controls.clone());
+                app.set_night(crate::night::Night::read(&root));
                 app.set_shortcuts(shortcuts.clone());
                 app
             },
@@ -68,6 +74,7 @@ impl Session {
             rewinding: false,
             fast: false,
             motor: 0,
+            buzz_until: 0,
             pulse: None,
             reloading: false,
             driven: false,
@@ -356,6 +363,13 @@ impl Session {
     }
 
     fn sync_rumble(&mut self) {
+        let at = self.app.now();
+        if self.app.take_buzz() {
+            self.buzz_until = at + BUZZ_MS;
+        }
+        if at < self.buzz_until && self.app.rumble_enabled() {
+            return self.rumble(BUZZ_STRENGTH);
+        }
         let asked = match &self.emu {
             Some(emu) if self.playing() && self.app.rumble_enabled() => emu.rumble().strength(),
             _ => {

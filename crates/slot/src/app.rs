@@ -447,6 +447,9 @@ pub struct App {
     brick_mute: Option<bool>,
     #[cfg(feature = "brick")]
     brick_switch_at: Millis,
+    /// What the Fn switch changes while it is on (Night Mode), and a buzz waiting to be felt.
+    night: crate::night::Night,
+    buzz_pending: bool,
     /// When to next ask whether Wi-Fi is joined but offline (brick_wifi::keep_lease).
     #[cfg(feature = "brick")]
     lease_check_at: Millis,
@@ -729,6 +732,8 @@ impl App {
             brick_mute: None,
             #[cfg(feature = "brick")]
             brick_switch_at: 0,
+            night: crate::night::Night::default(),
+            buzz_pending: false,
             #[cfg(feature = "brick")]
             lease_check_at: 0,
             powering_off: false,
@@ -1355,7 +1360,8 @@ impl App {
             | QuickRow::Sc13
             | QuickRow::Sc14
             | QuickRow::Sc15 => None,
-            QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 | QuickRow::ScReset3 => self.reset_asked,
+            QuickRow::ControlsFn | QuickRow::NightBrightness | QuickRow::NightExposure | QuickRow::NightColour => None,
+            QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 | QuickRow::ScReset3 | QuickRow::NightReset => self.reset_asked,
             QuickRow::GbOverlay | QuickRow::GbcOverlay | QuickRow::GbaOverlay | QuickRow::NesOverlay | QuickRow::SnesOverlay | QuickRow::Ps1Overlay | QuickRow::Wifi | QuickRow::CartArt | QuickRow::Achievements | QuickRow::Update | QuickRow::System | QuickRow::Library | QuickRow::DateTime | QuickRow::About | QuickRow::Screen | QuickRow::ScreenGb | QuickRow::ScreenGba | QuickRow::ScreenNes | QuickRow::ScreenSnes | QuickRow::ScreenPs1 | QuickRow::Game | QuickRow::Lights | QuickRow::LedMode | QuickRow::LedTop | QuickRow::LedButtons | QuickRow::LedTriggers | QuickRow::LedSticks | QuickRow::LedColor | QuickRow::LedEffect | QuickRow::Font | QuickRow::Online | QuickRow::Clock | QuickRow::Saving | QuickRow::LibrarySystems | QuickRow::AboutVersion | QuickRow::AboutBuild | QuickRow::AboutDevice | QuickRow::AboutFirmware | QuickRow::AboutCard | QuickRow::AboutLabel | QuickRow::SystemSounds | QuickRow::SoundVolume => None,
         }
     }
@@ -1746,6 +1752,120 @@ impl App {
         }
     }
 
+    /// Night Mode: the Fn switch is on (it mutes the sound too).
+    #[cfg(feature = "brick")]
+    pub fn night_on(&self) -> bool {
+        self.brick_mute == Some(true)
+    }
+
+    #[cfg(not(feature = "brick"))]
+    pub fn night_on(&self) -> bool {
+        false
+    }
+
+    pub fn night(&self) -> &crate::night::Night {
+        &self.night
+    }
+
+    pub fn set_night(&mut self, night: crate::night::Night) {
+        self.night = night;
+    }
+
+    /// The backlight step in use: Night Mode's while the switch is on.
+    fn backlight_level(&self) -> u8 {
+        if self.night_on() {
+            self.night.brightness
+        } else {
+            self.state.brightness
+        }
+    }
+
+    /// The blue-light step to draw with: Night Mode's colour while the switch is on.
+    pub fn blue_light_shown(&self) -> u8 {
+        if self.night_on() {
+            self.night.colour
+        } else {
+            self.state.blue_light
+        }
+    }
+
+    /// How far the picture is dimmed below the backlight's lowest step: Night Mode's exposure.
+    pub fn exposure_shown(&self) -> u8 {
+        if self.night_on() {
+            self.night.exposure
+        } else {
+            0
+        }
+    }
+
+    /// A buzz of the motor was asked for (the Fn switch went on): true once.
+    pub fn take_buzz(&mut self) -> bool {
+        std::mem::take(&mut self.buzz_pending)
+    }
+
+    fn apply_backlight(&mut self) {
+        let level = self.backlight_level();
+        if let Some(power) = &mut self.power {
+            power.set_backlight(level);
+        }
+    }
+
+    fn save_night(&self) {
+        let Some(root) = &self.root else {
+            return;
+        };
+        if let Err(e) = self.night.write(root) {
+            eprintln!("slot: night.ini: {e}");
+        }
+    }
+
+    /// The Fn switch changed: the backlight follows it, a notice says so and, as it goes on, the
+    /// Brick buzzes. Not at start, when the switch is just read.
+    #[cfg(feature = "brick")]
+    fn apply_night(&mut self, initial: bool) {
+        self.apply_backlight();
+        if initial {
+            return;
+        }
+        let on = self.night_on();
+        let said = if on { Toast::NightOn } else { Toast::NightOff };
+        self.hud.toast(said, self.now());
+        if on {
+            self.buzz_pending = true;
+        }
+    }
+
+    /// What a Fn Switch row says: its number.
+    fn night_text(&self, slot: usize) -> &'static str {
+        const NUMBERS: [&str; 21] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20"];
+        let value = match slot {
+            0 => self.night.brightness,
+            1 => self.night.exposure,
+            2 => self.night.colour,
+            _ => 0,
+        };
+        NUMBERS[usize::from(value).min(20)]
+    }
+
+    /// One more or one less on a Fn Switch row, within its limits.
+    fn step_night(&mut self, row: QuickRow, right: bool) {
+        let (value, max) = match row {
+            QuickRow::NightBrightness => (&mut self.night.brightness, BRIGHTNESS_MAX),
+            QuickRow::NightExposure => (&mut self.night.exposure, crate::night::EXPOSURE_MAX),
+            QuickRow::NightColour => (&mut self.night.colour, BLUE_LIGHT_MAX),
+            _ => return,
+        };
+        *value = if right { (*value + 1).min(max) } else { value.saturating_sub(1) };
+        self.apply_backlight();
+        self.save_night();
+    }
+
+    fn reset_night(&mut self) {
+        self.night = crate::night::Night::default();
+        self.apply_backlight();
+        self.save_night();
+    }
+
     fn quick_disabled(&self, row: QuickRow) -> bool {
         #[cfg(feature = "brick")]
         if matches!(row, QuickRow::CartArt | QuickRow::Achievements | QuickRow::Update) {
@@ -1896,7 +2016,8 @@ impl App {
                 PERCENTS[((self.state.sound_volume / slot_store::SOUND_VOLUME_STEP) as usize).min(PERCENTS.len() - 1)]
             }
             None if at >= QuickRow::PAD_FIRST && at < QuickRow::SC_FIRST => self.pad_text(at - QuickRow::PAD_FIRST),
-            None if at >= QuickRow::SC_FIRST && at < QuickRow::NAMED - 1 => self.shortcut_text(at - QuickRow::SC_FIRST),
+            None if at >= QuickRow::SC_FIRST && at < QuickRow::NIGHT_FIRST => self.shortcut_text(at - QuickRow::SC_FIRST),
+            None if at >= QuickRow::NIGHT_FIRST && at < QuickRow::NAMED - 1 => self.night_text(at - QuickRow::NIGHT_FIRST),
             None => self.about.get(at - Platform::ALL.len() - 1).map_or("", String::as_str),
         }
     }
@@ -2135,7 +2256,7 @@ impl App {
     }
 
     pub fn set_power(&mut self, mut power: Power) {
-        power.set_backlight(self.state.brightness);
+        power.set_backlight(self.backlight_level());
         self.headphones = power.headphones();
         self.hud.set_headphones(self.headphones);
         let secs = power.now();
@@ -2603,7 +2724,7 @@ impl App {
     fn quick_menu_step(&mut self, row: QuickRow, action: Action) {
         // Reset Settings asks once; any other press takes the question back.
         let pressed = matches!(action, Action::GbaDown(_) | Action::QuickMenu);
-        let resets = matches!(row, QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 | QuickRow::ScReset3);
+        let resets = matches!(row, QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 | QuickRow::ScReset3 | QuickRow::NightReset);
         if pressed && !(resets && action == Action::GbaDown(Btn::A)) {
             self.reset_asked = None;
         }
@@ -2666,16 +2787,17 @@ impl App {
             }
             QuickRow::AboutLabel => self.phase = Phase::About,
             QuickRow::AboutVersion | QuickRow::AboutBuild | QuickRow::AboutDevice | QuickRow::AboutFirmware | QuickRow::AboutCard => {}
-            QuickRow::Controls | QuickRow::ControlsButtons | QuickRow::ControlsShortcuts => {
+            QuickRow::Controls | QuickRow::ControlsButtons | QuickRow::ControlsShortcuts | QuickRow::ControlsFn => {
                 if let Some(row) = row.child() {
                     self.phase = Phase::QuickMenu { row };
                 }
             }
-            QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 | QuickRow::ScReset3 => match self.reset_asked {
+            QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 | QuickRow::ScReset3 | QuickRow::NightReset => match self.reset_asked {
                 None => self.reset_asked = Some(QuickValue::ResetAsk),
                 Some(QuickValue::ResetAsk) => {
                     match row {
                         QuickRow::PadReset => self.reset_controls(),
+                        QuickRow::NightReset => self.reset_night(),
                         _ => self.reset_shortcuts(),
                     }
                     self.reset_asked = Some(QuickValue::ResetDone);
@@ -2709,6 +2831,7 @@ impl App {
             | QuickRow::Sc13
             | QuickRow::Sc14
             | QuickRow::Sc15 => self.start_capture(row),
+            QuickRow::NightBrightness | QuickRow::NightExposure | QuickRow::NightColour => {}
             QuickRow::ResetSettings => match self.reset_asked {
                 None => self.reset_asked = Some(QuickValue::ResetAsk),
                 Some(QuickValue::ResetAsk) => {
@@ -2890,6 +3013,8 @@ impl App {
             | QuickRow::Sc13
             | QuickRow::Sc14
             | QuickRow::Sc15 => return,
+            QuickRow::NightBrightness | QuickRow::NightExposure | QuickRow::NightColour => return self.step_night(row, right),
+            QuickRow::ControlsFn | QuickRow::NightReset => return,
             QuickRow::Rumble => s.rumble = !s.rumble,
             QuickRow::SoundMenu => s.menu_sounds = !s.menu_sounds,
             QuickRow::SoundStar => s.sound_star = !s.sound_star,
@@ -3039,10 +3164,10 @@ impl App {
         }
         let s = &self.state;
         let (kind, value) = match action {
-            Action::BrightnessUp => (HudKind::Brightness, up(s.brightness, 1, BRIGHTNESS_MAX)),
-            Action::BrightnessDown => (HudKind::Brightness, s.brightness.saturating_sub(1)),
-            Action::BlueLightUp => (HudKind::BlueLight, up(s.blue_light, 1, BLUE_LIGHT_MAX)),
-            Action::BlueLightDown => (HudKind::BlueLight, s.blue_light.saturating_sub(1)),
+            Action::BrightnessUp => (HudKind::Brightness, up(self.backlight_level(), 1, BRIGHTNESS_MAX)),
+            Action::BrightnessDown => (HudKind::Brightness, self.backlight_level().saturating_sub(1)),
+            Action::BlueLightUp => (HudKind::BlueLight, up(self.blue_light_shown(), 1, BLUE_LIGHT_MAX)),
+            Action::BlueLightDown => (HudKind::BlueLight, self.blue_light_shown().saturating_sub(1)),
             Action::VolumeUp => (HudKind::Volume, up(self.level(), VOLUME_STEP, VOLUME_MAX)),
             Action::VolumeDown => (HudKind::Volume, self.level().saturating_sub(VOLUME_STEP)),
             _ => return false,
@@ -3051,7 +3176,9 @@ impl App {
             self.remember_volume();
         }
         let level = match kind {
+            HudKind::Brightness if self.night_on() => &mut self.night.brightness,
             HudKind::Brightness => &mut self.state.brightness,
+            HudKind::BlueLight if self.night_on() => &mut self.night.colour,
             HudKind::BlueLight => &mut self.state.blue_light,
             HudKind::Volume if self.headphones => &mut self.state.volume_hp,
             HudKind::Volume => &mut self.state.volume,
@@ -3067,6 +3194,9 @@ impl App {
         }
         if moved || unmuted {
             self.persist_soon();
+        }
+        if moved && self.night_on() && matches!(kind, HudKind::Brightness | HudKind::BlueLight) {
+            self.save_night();
         }
         true
     }
@@ -3162,6 +3292,7 @@ impl App {
         if !initial {
             self.hud.show(HudKind::Volume,self.output_volume(),self.muted(),self.now());
         }
+        self.apply_night(initial);
     }
     pub fn muted(&self) -> bool {
         #[cfg(feature = "brick")]

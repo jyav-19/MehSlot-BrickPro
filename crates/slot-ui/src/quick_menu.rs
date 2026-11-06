@@ -124,10 +124,15 @@ pub enum QuickRow {
     ScReset2,
     ScPage3,
     ScReset3,
+    ControlsFn,
+    NightBrightness,
+    NightExposure,
+    NightColour,
+    NightReset,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 111] = [
+    pub const ALL: [QuickRow; 116] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -239,6 +244,11 @@ impl QuickRow {
         QuickRow::ScReset2,
         QuickRow::ScPage3,
         QuickRow::ScReset3,
+        QuickRow::ControlsFn,
+        QuickRow::NightBrightness,
+        QuickRow::NightExposure,
+        QuickRow::NightColour,
+        QuickRow::NightReset,
     ];
 
     #[cfg(not(feature = "brick"))]
@@ -284,7 +294,7 @@ impl QuickRow {
     pub const SYSTEMS: [QuickRow; 6] =
         [QuickRow::ShowGba, QuickRow::ShowGb, QuickRow::ShowGbc, QuickRow::ShowNes, QuickRow::ShowSnes, QuickRow::ShowPs1];
     /// Controls: its two pages.
-    pub const CONTROLS_MENU: [QuickRow; 2] = [QuickRow::ControlsButtons, QuickRow::ControlsShortcuts];
+    pub const CONTROLS_MENU: [QuickRow; 3] = [QuickRow::ControlsButtons, QuickRow::ControlsShortcuts, QuickRow::ControlsFn];
     /// Controls → Button Remapping: the console, then what each button sends there.
     pub const PAD_PAGE: [QuickRow; 9] = [
         QuickRow::PadConsole,
@@ -308,6 +318,10 @@ impl QuickRow {
         QuickRow::PadR1,
         QuickRow::PadStart,
     ];
+    /// Controls → Fn Switch: what Night Mode sets, as numbers.
+    pub const FN_PAGE: [QuickRow; 4] = [QuickRow::NightBrightness, QuickRow::NightExposure, QuickRow::NightColour, QuickRow::NightReset];
+    /// The Fn Switch rows that read a number.
+    pub const NIGHTS: [QuickRow; 3] = [QuickRow::NightBrightness, QuickRow::NightExposure, QuickRow::NightColour];
     /// Controls → Shortcuts: three pages, which L1 and R1 turn between.
     pub const SC_PAGE_1: [QuickRow; 8] = [
         QuickRow::ScPage1,
@@ -393,7 +407,13 @@ impl QuickRow {
     pub const PAD_FIRST: usize = slot_store::Platform::ALL.len() + 1 + Self::ABOUT_INFO.len();
     /// Where the shortcut rows' combos start: after the Button Remapping names.
     pub const SC_FIRST: usize = Self::PAD_FIRST + Self::PADS.len();
-    pub const NAMED: usize = Self::SC_FIRST + Self::SCS.len() + 1;
+    /// Where the Fn Switch rows' numbers start: after the shortcuts'.
+    pub const NIGHT_FIRST: usize = Self::SC_FIRST + Self::SCS.len();
+    pub const NAMED: usize = Self::NIGHT_FIRST + Self::NIGHTS.len() + 1;
+    /// A Fn Switch row's place among those that read a number.
+    pub fn night_slot(self) -> Option<usize> {
+        Self::NIGHTS.iter().position(|r| *r == self)
+    }
     /// A Button Remapping row's place among those that read a name.
     pub fn pad_slot(self) -> Option<usize> {
         Self::PADS.iter().position(|r| *r == self)
@@ -421,6 +441,7 @@ impl QuickRow {
             row if row.info() => Self::ABOUT_INFO.iter().position(|r| *r == row).map(|at| about + at),
             row if row.pad_slot().is_some() => row.pad_slot().map(|at| Self::PAD_FIRST + at),
             row if row.sc_index().is_some() => row.sc_index().map(|at| Self::SC_FIRST + at),
+            row if row.night_slot().is_some() => row.night_slot().map(|at| Self::NIGHT_FIRST + at),
             _ => self.overlay_of().map(|p| p.index()),
         }
     }
@@ -518,7 +539,9 @@ impl QuickRow {
             | QuickRow::LibraryTitleCard => &QuickRow::LIBRARY,
             QuickRow::Wifi | QuickRow::CartArt | QuickRow::Achievements | QuickRow::Update => &QuickRow::ONLINE,
             QuickRow::ControlsButtons
-            | QuickRow::ControlsShortcuts => &QuickRow::CONTROLS_MENU,
+            | QuickRow::ControlsShortcuts
+            | QuickRow::ControlsFn => &QuickRow::CONTROLS_MENU,
+            QuickRow::NightBrightness | QuickRow::NightExposure | QuickRow::NightColour | QuickRow::NightReset => &QuickRow::FN_PAGE,
             QuickRow::PadConsole
             | QuickRow::PadA
             | QuickRow::PadB
@@ -563,6 +586,7 @@ impl QuickRow {
             QuickRow::NesShader => Some(QuickRow::ScreenNes),
             QuickRow::SnesShader => Some(QuickRow::ScreenSnes),
             QuickRow::Ps1Shader => Some(QuickRow::ScreenPs1),
+            QuickRow::NightBrightness => Some(QuickRow::ControlsFn),
             QuickRow::ControlsButtons => Some(QuickRow::Controls),
             QuickRow::PadConsole => Some(QuickRow::ControlsButtons),
             QuickRow::ScPage1 | QuickRow::ScPage2 | QuickRow::ScPage3 => Some(QuickRow::ControlsShortcuts),
@@ -601,6 +625,7 @@ impl QuickRow {
             QuickRow::Controls => Some(QuickRow::CONTROLS_MENU[0]),
             QuickRow::ControlsButtons => Some(QuickRow::PAD_PAGE[0]),
             QuickRow::ControlsShortcuts => Some(QuickRow::SC_PAGE_1[1]),
+            QuickRow::ControlsFn => Some(QuickRow::FN_PAGE[0]),
             _ => None,
         }
     }
@@ -683,6 +708,11 @@ impl QuickRow {
             QuickRow::Controls => "Controls",
             QuickRow::ControlsButtons => "Button Remapping",
             QuickRow::ControlsShortcuts => "Shortcuts",
+            QuickRow::ControlsFn => "Fn Switch",
+            QuickRow::NightBrightness => "Brightness",
+            QuickRow::NightExposure => "Exposure",
+            QuickRow::NightColour => "Colour Correction",
+            QuickRow::NightReset => "Reset to Defaults",
             QuickRow::PadConsole => "Console",
             QuickRow::PadA => "A",
             QuickRow::PadB => "B",
@@ -729,6 +759,8 @@ impl QuickRow {
                 | QuickRow::ScReset1
                 | QuickRow::ScReset2
                 | QuickRow::ScReset3
+                | QuickRow::ControlsFn
+                | QuickRow::NightReset
                 | QuickRow::Sc0
                 | QuickRow::Sc1
                 | QuickRow::Sc2
@@ -1110,7 +1142,7 @@ impl QuickMenu<'_> {
         }
         let [back, change, open, reset] = faces.legend;
         let other = match self.row {
-            QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 | QuickRow::ScReset3 => reset,
+            QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 | QuickRow::ScReset3 | QuickRow::NightReset => reset,
             row if row.opens() => open,
             _ => change,
         };

@@ -25,11 +25,13 @@ pub enum Toast {
     CardUnwritable,
     PictureFull,
     PictureOriginal,
+    NightOn,
+    NightOff,
     Palette(GbPalette),
 }
 
 impl Toast {
-    const FIXED: [Toast; 17] = [
+    const FIXED: [Toast; 19] = [
         Toast::StateSaved,
         Toast::StateLoaded,
         Toast::NeedsGpsp,
@@ -47,6 +49,8 @@ impl Toast {
         Toast::CardUnwritable,
         Toast::PictureFull,
         Toast::PictureOriginal,
+        Toast::NightOn,
+        Toast::NightOff,
     ];
 
     pub fn all() -> Vec<Toast> {
@@ -93,6 +97,8 @@ impl Toast {
             Toast::CardUnwritable => "Can't write to SD card",
             Toast::PictureFull => "Screen: 4:3 Full",
             Toast::PictureOriginal => "Screen: 3:2 Original",
+            Toast::NightOn => "Night Mode On",
+            Toast::NightOff => "Night Mode Off",
             Toast::Palette(p) => p.label(),
         }
     }
