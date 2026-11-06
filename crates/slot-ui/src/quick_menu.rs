@@ -129,10 +129,11 @@ pub enum QuickRow {
     NightExposure,
     NightColour,
     NightReset,
+    NightToggle,
 }
 
 impl QuickRow {
-    pub const ALL: [QuickRow; 116] = [
+    pub const ALL: [QuickRow; 117] = [
         QuickRow::FastForward,
         QuickRow::FastForwardSound,
         QuickRow::Screen,
@@ -249,6 +250,7 @@ impl QuickRow {
         QuickRow::NightExposure,
         QuickRow::NightColour,
         QuickRow::NightReset,
+        QuickRow::NightToggle,
     ];
 
     #[cfg(not(feature = "brick"))]
@@ -319,7 +321,7 @@ impl QuickRow {
         QuickRow::PadStart,
     ];
     /// Controls → Fn Switch: what Night Mode sets, as numbers.
-    pub const FN_PAGE: [QuickRow; 4] = [QuickRow::NightBrightness, QuickRow::NightExposure, QuickRow::NightColour, QuickRow::NightReset];
+    pub const FN_PAGE: [QuickRow; 5] = [QuickRow::NightToggle, QuickRow::NightBrightness, QuickRow::NightExposure, QuickRow::NightColour, QuickRow::NightReset];
     /// The Fn Switch rows that read a number.
     pub const NIGHTS: [QuickRow; 3] = [QuickRow::NightBrightness, QuickRow::NightExposure, QuickRow::NightColour];
     /// Controls → Shortcuts: three pages, which L1 and R1 turn between.
@@ -541,7 +543,7 @@ impl QuickRow {
             QuickRow::ControlsButtons
             | QuickRow::ControlsShortcuts
             | QuickRow::ControlsFn => &QuickRow::CONTROLS_MENU,
-            QuickRow::NightBrightness | QuickRow::NightExposure | QuickRow::NightColour | QuickRow::NightReset => &QuickRow::FN_PAGE,
+            QuickRow::NightToggle | QuickRow::NightBrightness | QuickRow::NightExposure | QuickRow::NightColour | QuickRow::NightReset => &QuickRow::FN_PAGE,
             QuickRow::PadConsole
             | QuickRow::PadA
             | QuickRow::PadB
@@ -586,7 +588,7 @@ impl QuickRow {
             QuickRow::NesShader => Some(QuickRow::ScreenNes),
             QuickRow::SnesShader => Some(QuickRow::ScreenSnes),
             QuickRow::Ps1Shader => Some(QuickRow::ScreenPs1),
-            QuickRow::NightBrightness => Some(QuickRow::ControlsFn),
+            QuickRow::NightToggle => Some(QuickRow::ControlsFn),
             QuickRow::ControlsButtons => Some(QuickRow::Controls),
             QuickRow::PadConsole => Some(QuickRow::ControlsButtons),
             QuickRow::ScPage1 | QuickRow::ScPage2 | QuickRow::ScPage3 => Some(QuickRow::ControlsShortcuts),
@@ -709,6 +711,7 @@ impl QuickRow {
             QuickRow::ControlsButtons => "Button Remapping",
             QuickRow::ControlsShortcuts => "Shortcuts",
             QuickRow::ControlsFn => "Fn Switch",
+            QuickRow::NightToggle => "Night Mode",
             QuickRow::NightBrightness => "Brightness",
             QuickRow::NightExposure => "Exposure",
             QuickRow::NightColour => "Colour Correction",

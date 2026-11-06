@@ -450,6 +450,8 @@ pub struct App {
     /// What the Fn switch changes while it is on (Night Mode), and a buzz waiting to be felt.
     night: crate::night::Night,
     buzz_pending: bool,
+    /// Night Mode turned on from the menu, to try it without the Fn switch.
+    night_manual: bool,
     /// When to next ask whether Wi-Fi is joined but offline (brick_wifi::keep_lease).
     #[cfg(feature = "brick")]
     lease_check_at: Millis,
@@ -734,6 +736,7 @@ impl App {
             brick_switch_at: 0,
             night: crate::night::Night::default(),
             buzz_pending: false,
+            night_manual: false,
             #[cfg(feature = "brick")]
             lease_check_at: 0,
             powering_off: false,
@@ -1360,6 +1363,7 @@ impl App {
             | QuickRow::Sc13
             | QuickRow::Sc14
             | QuickRow::Sc15 => None,
+            QuickRow::NightToggle => Some(QuickValue::flag(self.night_on())),
             QuickRow::ControlsFn | QuickRow::NightBrightness | QuickRow::NightExposure | QuickRow::NightColour => None,
             QuickRow::ResetSettings | QuickRow::PadReset | QuickRow::ScReset1 | QuickRow::ScReset2 | QuickRow::ScReset3 | QuickRow::NightReset => self.reset_asked,
             QuickRow::GbOverlay | QuickRow::GbcOverlay | QuickRow::GbaOverlay | QuickRow::NesOverlay | QuickRow::SnesOverlay | QuickRow::Ps1Overlay | QuickRow::Wifi | QuickRow::CartArt | QuickRow::Achievements | QuickRow::Update | QuickRow::System | QuickRow::Library | QuickRow::DateTime | QuickRow::About | QuickRow::Screen | QuickRow::ScreenGb | QuickRow::ScreenGba | QuickRow::ScreenNes | QuickRow::ScreenSnes | QuickRow::ScreenPs1 | QuickRow::Game | QuickRow::Lights | QuickRow::LedMode | QuickRow::LedTop | QuickRow::LedButtons | QuickRow::LedTriggers | QuickRow::LedSticks | QuickRow::LedColor | QuickRow::LedEffect | QuickRow::Font | QuickRow::Online | QuickRow::Clock | QuickRow::Saving | QuickRow::LibrarySystems | QuickRow::AboutVersion | QuickRow::AboutBuild | QuickRow::AboutDevice | QuickRow::AboutFirmware | QuickRow::AboutCard | QuickRow::AboutLabel | QuickRow::SystemSounds | QuickRow::SoundVolume => None,
@@ -1755,12 +1759,12 @@ impl App {
     /// Night Mode: the Fn switch is on (it mutes the sound too).
     #[cfg(feature = "brick")]
     pub fn night_on(&self) -> bool {
-        self.brick_mute == Some(true)
+        self.brick_mute == Some(true) || self.night_manual
     }
 
     #[cfg(not(feature = "brick"))]
     pub fn night_on(&self) -> bool {
-        false
+        self.night_manual
     }
 
     pub fn night(&self) -> &crate::night::Night {
@@ -1803,6 +1807,19 @@ impl App {
         std::mem::take(&mut self.buzz_pending)
     }
 
+    /// Night Mode on or off from the menu, to try it without the Fn switch (and in the
+    /// simulator, which has none). Not while the switch itself has it on.
+    fn toggle_night(&mut self) {
+        #[cfg(feature = "brick")]
+        if self.brick_mute == Some(true) {
+            return;
+        }
+        self.night_manual = !self.night_manual;
+        self.apply_backlight();
+        let said = if self.night_manual { Toast::NightOn } else { Toast::NightOff };
+        self.hud.toast(said, self.now());
+    }
+
     fn apply_backlight(&mut self) {
         let level = self.backlight_level();
         if let Some(power) = &mut self.power {
@@ -1823,6 +1840,8 @@ impl App {
     /// Brick buzzes. Not at start, when the switch is just read.
     #[cfg(feature = "brick")]
     fn apply_night(&mut self, initial: bool) {
+        // The switch has the say: a Night Mode tried from the menu is over.
+        self.night_manual = false;
         self.apply_backlight();
         if initial {
             return;
@@ -2831,6 +2850,7 @@ impl App {
             | QuickRow::Sc13
             | QuickRow::Sc14
             | QuickRow::Sc15 => self.start_capture(row),
+            QuickRow::NightToggle => self.toggle_night(),
             QuickRow::NightBrightness | QuickRow::NightExposure | QuickRow::NightColour => {}
             QuickRow::ResetSettings => match self.reset_asked {
                 None => self.reset_asked = Some(QuickValue::ResetAsk),
@@ -3013,6 +3033,7 @@ impl App {
             | QuickRow::Sc13
             | QuickRow::Sc14
             | QuickRow::Sc15 => return,
+            QuickRow::NightToggle => return self.toggle_night(),
             QuickRow::NightBrightness | QuickRow::NightExposure | QuickRow::NightColour => return self.step_night(row, right),
             QuickRow::ControlsFn | QuickRow::NightReset => return,
             QuickRow::Rumble => s.rumble = !s.rumble,
