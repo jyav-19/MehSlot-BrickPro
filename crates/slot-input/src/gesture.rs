@@ -100,6 +100,9 @@ pub struct Gestures {
     shortcuts: Shortcuts,
     /// The next shortcut pressed is reported as `Action::Capture`, not done.
     capture: bool,
+    /// Which function keys are held, and whether another button was pressed with them.
+    fn_down: [bool; 2],
+    fn_chorded: [bool; 2],
 }
 
 fn ramp_due(down: Option<Millis>, last: Option<Millis>, now: Millis) -> bool {
@@ -201,6 +204,29 @@ impl Gestures {
     }
 
     fn down(&mut self, b: Btn, now: Millis) -> Vec<Action> {
+        // A function key: nothing yet. It is a press by itself if it is let go of alone, or the
+        // modifier of whatever button is pressed while it is held.
+        if let Some(i) = fn_index(b) {
+            self.fn_down[i] = true;
+            self.fn_chorded[i] = false;
+            return Vec::new();
+        }
+        if let Some(i) = (0..2).find(|&i| self.fn_down[i]) {
+            let modifier = [Modifier::F1, Modifier::F2][i];
+            self.fn_chorded[i] = true;
+            if self.capture && BINDABLE.contains(&b) {
+                self.capture = false;
+                return vec![Action::Capture(modifier, b)];
+            }
+            if let Some((at, action)) = self.shortcuts.find(modifier, b) {
+                let bit = 1u32 << at;
+                if self.chord_held & bit != 0 {
+                    return Vec::new();
+                }
+                self.chord_held |= bit;
+                return vec![action];
+            }
+        }
         if let (true, Some(bit)) = (self.triggers_to_game, trigger_bit(b)) {
             if self.menu_down_at.is_none() {
                 return vec![Action::GbaDown(b)];
@@ -252,6 +278,19 @@ impl Gestures {
     }
 
     fn up(&mut self, b: Btn, now: Millis) -> Vec<Action> {
+        if let Some(i) = fn_index(b) {
+            let held = std::mem::replace(&mut self.fn_down[i], false);
+            if held && !self.fn_chorded[i] {
+                if self.capture {
+                    self.capture = false;
+                    return vec![Action::Capture(Modifier::Alone, b)];
+                }
+                if let Some((_, action)) = self.shortcuts.find(Modifier::Alone, b) {
+                    return vec![action];
+                }
+            }
+            return Vec::new();
+        }
         if let Some(bit) = trigger_bit(b) {
             if self.chord_held & bit != 0 {
                 self.chord_held &= !bit;
@@ -537,6 +576,11 @@ pub const BINDABLE: [Btn; 12] = [
 pub enum Modifier {
     Select,
     Home,
+    /// A function key held with the button: F1 + A.
+    F1,
+    F2,
+    /// A function key pressed by itself: the combo is that key, with nothing held.
+    Alone,
 }
 
 impl Modifier {
@@ -544,6 +588,9 @@ impl Modifier {
         match self {
             Modifier::Select => "SELECT",
             Modifier::Home => "HOME",
+            Modifier::F1 => "F1",
+            Modifier::F2 => "F2",
+            Modifier::Alone => "",
         }
     }
 }
@@ -653,6 +700,7 @@ impl Shortcuts {
         let mut text = String::new();
         for (key, shortcut) in SHORTCUT_KEYS.iter().zip(&self.list) {
             let value = match shortcut.combo {
+                Some((Modifier::Alone, button)) => format!("{button:?}"),
                 Some((modifier, button)) => format!("{}+{:?}", modifier.name(), button),
                 None => "Off".to_string(),
             };
@@ -668,10 +716,18 @@ fn parse_combo(value: &str) -> Option<Option<(Modifier, Btn)>> {
     if value.eq_ignore_ascii_case("off") || value.eq_ignore_ascii_case("none") {
         return Some(None);
     }
+    if value.eq_ignore_ascii_case("f1") {
+        return Some(Some((Modifier::Alone, Btn::F1)));
+    }
+    if value.eq_ignore_ascii_case("f2") {
+        return Some(Some((Modifier::Alone, Btn::F2)));
+    }
     let (modifier, button) = value.split_once('+')?;
     let modifier = match modifier.trim().to_ascii_lowercase().as_str() {
         "select" => Modifier::Select,
         "home" => Modifier::Home,
+        "f1" => Modifier::F1,
+        "f2" => Modifier::F2,
         _ => return None,
     };
     let button = BINDABLE
@@ -712,5 +768,42 @@ mod shortcut_tests {
         );
         g.feed(RawEvent::Up(Btn::R1), 150);
         assert_eq!(g.feed(RawEvent::Down(Btn::R1), 200), vec![Action::SaveState]);
+    }
+}
+
+/// Which function key a button is: F1 the first, F2 the second.
+fn fn_index(b: Btn) -> Option<usize> {
+    match b {
+        Btn::F1 => Some(0),
+        Btn::F2 => Some(1),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod function_key_tests {
+    use super::*;
+
+    #[test]
+    fn a_function_key_alone_and_with_a_button() {
+        let mut g = Gestures::brick();
+        g.set_shortcuts(Shortcuts::parse("save_state=F1\nload_state=F2+A\n", true));
+        assert!(g.feed(RawEvent::Down(Btn::F1), 0).is_empty());
+        assert_eq!(g.feed(RawEvent::Up(Btn::F1), 50), vec![Action::SaveState]);
+        assert!(g.feed(RawEvent::Down(Btn::F2), 100).is_empty());
+        assert_eq!(g.feed(RawEvent::Down(Btn::A), 120), vec![Action::LoadState]);
+        g.feed(RawEvent::Up(Btn::A), 150);
+        assert!(g.feed(RawEvent::Up(Btn::F2), 160).is_empty(), "a combo is not also a press");
+    }
+
+    #[test]
+    fn capture_takes_a_function_key_alone_or_with_a_button() {
+        let mut g = Gestures::brick();
+        g.set_capture(true);
+        g.feed(RawEvent::Down(Btn::F1), 0);
+        assert_eq!(g.feed(RawEvent::Up(Btn::F1), 40), vec![Action::Capture(Modifier::Alone, Btn::F1)]);
+        g.set_capture(true);
+        g.feed(RawEvent::Down(Btn::F2), 100);
+        assert_eq!(g.feed(RawEvent::Down(Btn::B), 120), vec![Action::Capture(Modifier::F2, Btn::B)]);
     }
 }

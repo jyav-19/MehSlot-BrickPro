@@ -24,6 +24,9 @@ pub fn button(index: u8) -> Option<Btn> {
         // The Brick Pro's second Menu key (NextUI's JOY_MENU_ALT). 9 and 10 are F1/F2 on the
         // Brick and the stick clicks on the Pro, 11 and 12 the Pro's F1/F2: none used.
         15 => Btn::Menu,
+        // The Brick Pro's F1 and F2 (NextUI's JOY_FN1 and JOY_FN2).
+        11 => Btn::F1,
+        12 => Btn::F2,
         _ => return None,
     })
 }
@@ -428,7 +431,7 @@ mod tests {
         assert_eq!(button(10), None);
         assert_eq!(button(13), Some(Btn::VolDown));
         assert_eq!(button(14), Some(Btn::VolUp));
-        assert_eq!(button(12), None);
+        assert_eq!(button(12), Some(Btn::F2));
     }
     #[test]
     fn rear_triggers_press_hold_release() {

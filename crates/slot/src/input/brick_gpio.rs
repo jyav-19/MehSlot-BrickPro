@@ -42,7 +42,7 @@ const BRICK_PINS: [(u32, Btn); 17] = [
 /// D-pad, A/B/X/Y, R1/R2 and the volume where the Brick has them; Select, Start, Menu and the
 /// left shoulders on other pins; and its second Menu key (Home), Menu too as on stock. F1/F2
 /// (239, 240) and the stick clicks (135, 136) are unused, as on stock.
-const PRO_PINS: [(u32, Btn); 18] = [
+const PRO_PINS: [(u32, Btn); 20] = [
     (113, Btn::Up),
     (110, Btn::Down),
     (111, Btn::Left),
@@ -59,13 +59,15 @@ const PRO_PINS: [(u32, Btn); 18] = [
     (238, Btn::Start),
     (236, Btn::Menu),
     (242, Btn::Menu),
+    (239, Btn::F1),
+    (240, Btn::F2),
     (116, Btn::VolDown),
     (117, Btn::VolUp),
 ];
 
 /// Every button the pins press, bit i for BUTTONS[i]: a held set by button rather than by pin,
 /// as the Brick Pro has two pins for Menu.
-const BUTTONS: [Btn; 17] = [
+const BUTTONS: [Btn; 19] = [
     Btn::Up,
     Btn::Down,
     Btn::Left,
@@ -83,6 +85,8 @@ const BUTTONS: [Btn; 17] = [
     Btn::Menu,
     Btn::VolDown,
     Btn::VolUp,
+    Btn::F1,
+    Btn::F2,
 ];
 
 /// How often the Brick Pro's sticks are read, as TrimUI's daemon reads them.
@@ -281,7 +285,7 @@ mod tests {
             }
         }
         // The Brick's buttons each on a pin of their own; the Pro's two Menu keys share one.
-        for btn in BUTTONS {
+        for btn in BUTTONS.into_iter().filter(|b| !matches!(b, Btn::F1 | Btn::F2)) {
             assert_eq!(BRICK_PINS.iter().filter(|(_, b)| *b == btn).count(), 1, "{btn:?} on the Brick");
             assert!(PRO_PINS.iter().any(|(_, b)| *b == btn), "{btn:?} on the Brick Pro");
         }

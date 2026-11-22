@@ -15,6 +15,9 @@ pub enum Btn {
     Start,
     Select,
     Menu,
+    /// The Brick's two front function keys, the pills under the screen.
+    F1,
+    F2,
     VolUp,
     VolDown,
     Power,

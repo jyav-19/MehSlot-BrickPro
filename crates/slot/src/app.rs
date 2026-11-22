@@ -438,6 +438,8 @@ pub struct App {
     headphones: bool,
     headphones_at: Millis,
     battery: Option<Battery>,
+    /// How fast the battery is falling, for the footer's time left.
+    drain: crate::drain::Drain,
     last_led: Option<LedState>,
     #[cfg(feature = "brick")]
     brick_leds: Option<crate::brick_led::BrickLeds>,
@@ -725,6 +727,7 @@ impl App {
             headphones: false,
             headphones_at: 0,
             battery: None,
+            drain: crate::drain::Drain::default(),
             last_led: None,
             #[cfg(feature = "brick")]
             brick_leds: None,
@@ -1638,6 +1641,8 @@ impl App {
         }
         const SELECT: [&str; 12] = ["SELECT + Up", "SELECT + Down", "SELECT + Left", "SELECT + Right", "SELECT + A", "SELECT + B", "SELECT + X", "SELECT + Y", "SELECT + L1", "SELECT + R1", "SELECT + L2", "SELECT + R2"];
         const HOME: [&str; 12] = ["HOME + Up", "HOME + Down", "HOME + Left", "HOME + Right", "HOME + A", "HOME + B", "HOME + X", "HOME + Y", "HOME + L1", "HOME + R1", "HOME + L2", "HOME + R2"];
+        const F_ONE: [&str; 12] = ["F1 + Up", "F1 + Down", "F1 + Left", "F1 + Right", "F1 + A", "F1 + B", "F1 + X", "F1 + Y", "F1 + L1", "F1 + R1", "F1 + L2", "F1 + R2"];
+        const F_TWO: [&str; 12] = ["F2 + Up", "F2 + Down", "F2 + Left", "F2 + Right", "F2 + A", "F2 + B", "F2 + X", "F2 + Y", "F2 + L1", "F2 + R1", "F2 + L2", "F2 + R2"];
         match self.shortcuts.list.get(at).map(|s| s.combo) {
             None => "",
             Some(None) => "Off",
@@ -1646,6 +1651,10 @@ impl App {
                 match modifier {
                     slot_input::Modifier::Select => SELECT[place],
                     slot_input::Modifier::Home => HOME[place],
+                    slot_input::Modifier::F1 => F_ONE[place],
+                    slot_input::Modifier::F2 => F_TWO[place],
+                    slot_input::Modifier::Alone if button == Btn::F2 => "F2",
+                    slot_input::Modifier::Alone => "F1",
                 }
             }
         }
@@ -2499,6 +2508,16 @@ impl App {
             .carts
             .get(self.shelf().index)
             .map(|c| c.stem.as_str())
+    }
+
+    /// How long the battery will last, as the footer prints it beside the percent (`3h 20m`, or
+    /// `--` until there is an estimate); none while it charges.
+    pub fn battery_estimate(&self) -> Option<String> {
+        let b = self.battery?;
+        if matches!(b.charge, Charge::Charging | Charge::Full) {
+            return None;
+        }
+        Some(self.drain.text(self.now()))
     }
 
     pub fn battery(&self) -> Option<Battery> {
@@ -3605,6 +3624,8 @@ impl App {
             self.battery_at = self.now() + BATTERY_POLL_MS;
             self.battery = self.power.as_ref().and_then(|p| p.battery());
             if let Some(b) = self.battery {
+                let (at, charging) = (self.now(), matches!(b.charge, Charge::Charging | Charge::Full));
+                self.drain.sample(at, b.percent, charging);
                 self.on_battery(b);
             }
         }
@@ -3985,7 +4006,13 @@ impl App {
                     self.shelf_clock,
                     out,
                 );
-                slot_ui::draw_footer_note(self.battery_percent, self.played, out);
+                slot_ui::draw_footer_note(
+                    self.played,
+                    self.wifi_face(),
+                    self.update_face(),
+                    self.shelf_clock,
+                    out,
+                );
             }
             Phase::About => {
                 draw_backdrop(self.wallpaper, out);

@@ -7,6 +7,8 @@ use crate::slot_chrome::MOUTH_H;
 
 const FOOTER_Y: f32 = OUT_H as f32 - MOUTH_H + (MOUTH_H - HINT_H as f32) / 2.0;
 const FOOTER_MARGIN: f32 = 24.0;
+/// How far the battery's icon, percent and time left sit from the left edge.
+const GAUGE_MARGIN: f32 = 12.0;
 
 #[derive(Copy, Clone, Default, PartialEq, Eq, Debug)]
 pub struct Printed {
@@ -37,7 +39,7 @@ pub fn draw_footer(
     out: &mut Vec<Draw>,
 ) {
     let y = FOOTER_Y + (HINT_H as f32 - GAUGE_H) / 2.0;
-    draw_gauge(FOOTER_MARGIN, y, battery, percent, bolt, out);
+    draw_gauge(GAUGE_MARGIN, y, battery, percent, bolt, out);
     let clock_x = OUT_W as f32 - FOOTER_MARGIN - clock.w as f32;
     printed(clock_x, clock, out);
     // To the left of the clock: the two together say what the Brick is doing right now. A
@@ -56,13 +58,23 @@ pub fn draw_footer(
     }
 }
 
-/// How far a note sits from the battery's percent.
-const NOTE_GAP: f32 = 22.0;
+/// How far the note sits from the symbols (or the clock) to its right.
+const NOTE_GAP: f32 = 16.0;
 
-/// A note beside the battery's percent (the selected game's play time, on the shelf).
-pub fn draw_footer_note(percent: Printed, note: Printed, out: &mut Vec<Draw>) {
-    let x = crate::battery::gauge_end(FOOTER_MARGIN, percent) + NOTE_GAP;
-    printed(x.round(), note, out);
+/// A note on the right (the selected game's play time, on the shelf): just left of the Wi-Fi
+/// symbol and the update one, as they sit left of the clock, so it moves aside for them.
+pub fn draw_footer_note(
+    note: Printed,
+    wifi: Option<(TexId, u32, u32)>,
+    update: Option<(TexId, u32, u32)>,
+    clock: Printed,
+    out: &mut Vec<Draw>,
+) {
+    let mut right = OUT_W as f32 - FOOTER_MARGIN - clock.w as f32;
+    for (_, w, _) in [wifi, update].into_iter().flatten() {
+        right -= WIFI_GAP + w as f32;
+    }
+    printed((right - NOTE_GAP - note.w as f32).round(), note, out);
 }
 
 pub(crate) fn draw_printed(x: f32, y: f32, p: Printed, out: &mut Vec<Draw>) {

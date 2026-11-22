@@ -1152,7 +1152,10 @@ fn sync_clock(app: &mut App, compositor: &mut Compositor, clocks: &mut Clocks) {
     }
     let battery_shown = app
         .battery()
-        .map(|b| format!("{}%", b.percent))
+        .map(|b| match app.battery_estimate() {
+            Some(left) => format!("{}%  {left}", b.percent),
+            None => format!("{}%", b.percent),
+        })
         .unwrap_or_default();
     if battery_shown != clocks.battery {
         clocks.battery = battery_shown.clone();

@@ -43,6 +43,7 @@ pub mod thumb;
 pub mod update;
 pub mod video_mode;
 pub mod night;
+pub mod drain;
 pub mod wallpaper;
 
 #[cfg(feature = "brick")]
