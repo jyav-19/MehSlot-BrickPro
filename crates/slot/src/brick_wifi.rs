@@ -362,27 +362,34 @@ enum RaDone{LoggedIn(Result<(ra::Account,ra::Profile)>),Checked(Result<ra::Profi
 fn profile_line(p:&ra::Profile)->String{format!("Connected in {} ms: {}, {} points ({} softcore)",p.ms,p.user,p.score,p.softcore)}
 /// The overlay behind HOME > Wi-Fi, Cart Art and RetroAchievements: `list` is set for
 /// Cart Art, `ra` for RetroAchievements.
-pub struct WifiMenu{worker:Option<Worker>,pub face:Option<TexId>,pub dirty:bool,on:bool,status:String,networks:Vec<Network>,row:usize,keyboard:Option<Keyboard>,refreshed:Instant,art:Option<ArtJob>,fetched:Vec<Fetched>,list:Option<ArtList>,ra:Option<RaScreen>,query:Option<Option<String>>,update:Option<crate::brick_update::UpdateScreen>}
+pub struct WifiMenu{worker:Option<Worker>,pub face:Option<TexId>,pub dirty:bool,on:bool,status:String,networks:Vec<Network>,row:usize,keyboard:Option<Keyboard>,refreshed:Instant,art:Option<ArtJob>,fetched:Vec<Fetched>,list:Option<ArtList>,ra:Option<RaScreen>,query:Option<Option<String>>,update:Option<crate::brick_update::UpdateScreen>,cheevos:Option<AchScreen>}
 impl WifiMenu{
-    pub fn new()->Self{let mut s=Self{worker:None,face:None,dirty:true,on:supplicant_up(),status:"Checking Wi-Fi...".into(),networks:Vec::new(),row:0,keyboard:None,refreshed:Instant::now(),art:None,fetched:Vec::new(),list:None,ra:None,query:None,update:None};s.start(Job::Open);s}
+    pub fn new()->Self{let mut s=Self{worker:None,face:None,dirty:true,on:supplicant_up(),status:"Checking Wi-Fi...".into(),networks:Vec::new(),row:0,keyboard:None,refreshed:Instant::now(),art:None,fetched:Vec::new(),list:None,ra:None,query:None,update:None,cheevos:None};s.start(Job::Open);s}
     /// The keyboard alone, to type what to search labels for: `name` to start from. Closes
     /// when done (START) or left (B); take_label_query then says which.
     pub fn label_query(name:&str)->Self{
         Self{worker:None,face:None,dirty:true,on:true,status:"Type part of a game's name".into(),networks:Vec::new(),row:0,
             keyboard:Some(Keyboard{target:KeyTarget::LabelQuery,secret:false,password:name.chars().take(64).collect(),key:0,page:0,typed:None}),
-            refreshed:Instant::now(),art:None,fetched:Vec::new(),list:None,ra:None,query:Some(None),update:None}
+            refreshed:Instant::now(),art:None,fetched:Vec::new(),list:None,ra:None,query:Some(None),update:None,cheevos:None}
     }
     /// What was typed to search labels for, once START closed the keyboard.
     pub fn take_label_query(&mut self)->Option<String>{self.query.as_mut()?.take()}
     pub fn cart_art()->Self{
         let list=ArtList::load();
         let status=format!("{} games have a label. A on one twice deletes it",list.games.len());
-        Self{worker:None,face:None,dirty:true,on:true,status,networks:Vec::new(),row:0,keyboard:None,refreshed:Instant::now(),art:None,fetched:Vec::new(),list:Some(list),ra:None,query:None,update:None}
+        Self{worker:None,face:None,dirty:true,on:true,status,networks:Vec::new(),row:0,keyboard:None,refreshed:Instant::now(),art:None,fetched:Vec::new(),list:Some(list),ra:None,query:None,update:None,cheevos:None}
     }
     pub fn update(root:&Path,known:Option<crate::update::Manifest>)->Self{
         let mut s=Self::cart_art_free();s.update=Some(crate::brick_update::UpdateScreen::open(root,known));s
     }
-    fn cart_art_free()->Self{Self{worker:None,face:None,dirty:true,on:true,status:String::new(),networks:Vec::new(),row:0,keyboard:None,refreshed:Instant::now(),art:None,fetched:Vec::new(),list:None,ra:None,query:None,update:None}}
+    /// The achievements screen: `items` as read, `note` saying why it is empty or that it is a kept copy.
+    pub fn achievement_list(items:Vec<slot_cheevos::Achievement>,note:Option<String>)->Self{
+        let mut s=Self::cart_art_free();
+        s.list=None;
+        s.cheevos=Some(AchScreen::new(items,note));
+        s
+    }
+    fn cart_art_free()->Self{Self{worker:None,face:None,dirty:true,on:true,status:String::new(),networks:Vec::new(),row:0,keyboard:None,refreshed:Instant::now(),art:None,fetched:Vec::new(),list:None,ra:None,query:None,update:None,cheevos:None}}
     /// The update is in: Slot should end and start again.
     pub fn take_restart(&mut self)->bool{self.update.as_mut().is_some_and(|u|u.take_restart())}
     pub fn take_update_verdict(&mut self)->Option<Option<crate::update::Manifest>>{self.update.as_mut().and_then(|u|u.take_verdict())}
@@ -390,7 +397,7 @@ impl WifiMenu{
     pub fn achievements()->Self{
         let account=ra::load(&card_root());
         let status=match &account{Some(a)=>format!("Logged in as {}",a.user),None=>"Log in with your RetroAchievements account".into()};
-        Self{worker:None,face:None,dirty:true,on:true,status,networks:Vec::new(),row:0,keyboard:None,refreshed:Instant::now(),art:None,fetched:Vec::new(),list:None,ra:Some(RaScreen{account,user:String::new(),password:String::new(),job:None,test:None}),query:None,update:None}
+        Self{worker:None,face:None,dirty:true,on:true,status,networks:Vec::new(),row:0,keyboard:None,refreshed:Instant::now(),art:None,fetched:Vec::new(),list:None,ra:Some(RaScreen{account,user:String::new(),password:String::new(),job:None,test:None}),query:None,update:None,cheevos:None}
     }
     pub fn busy(&self)->bool{self.update.as_ref().is_some_and(|u|u.busy()) || self.worker.is_some() || self.art.is_some() || self.ra.as_ref().is_some_and(|r|r.job.is_some())}
     pub fn cancel(&mut self){
@@ -444,6 +451,7 @@ impl WifiMenu{
         if self.list.is_none() && self.ra.is_none() && !self.busy() && self.keyboard.is_none() && self.refreshed.elapsed()>every{self.start(Job::Status);}
     }
     pub fn input(&mut self,a:Action)->bool{
+        if let Some(c)=&mut self.cheevos{self.dirty=true;return c.input(a)}
         if let Some(u)=&mut self.update{self.dirty=true;return u.input(a)}
         if self.busy(){if matches!(a,Action::GbaDown(Btn::B)){self.cancel();}return false}
         if !matches!(a,Action::GbaDown(_)|Action::ShelfLeft|Action::ShelfRight|Action::Insert){return false}
@@ -597,6 +605,7 @@ impl WifiMenu{
         UndoFace{rgba:p.rgba,w:640,h:480}
     }
     pub fn render(&self)->UndoFace{
+        if let Some(c)=&self.cheevos{return c.render()}
         if let Some(u)=&self.update{return self.render_update(u)}
         if self.keyboard.is_none(){
             if let Some(list)=&self.list{return self.render_art(list)}
@@ -625,6 +634,62 @@ fn wrap(text:&str,w:usize,px:f32)->Vec<String>{
         if !line.is_empty() && slot_ui::text::line_width(font,&next,px,0.0)>w as f32{lines.push(std::mem::replace(&mut line,word.to_string()));}else{line=next;}
     }
     if !line.is_empty(){lines.push(line);}lines
+}
+/// The achievements of the game being played, in pages, each marked done or not. Up and Down move
+/// along them, L1 and R1 (or Left and Right) turn the page, and B closes it.
+pub struct AchScreen{items:Vec<slot_cheevos::Achievement>,note:Option<String>,row:usize}
+const ACH_ROWS:usize=6;
+impl AchScreen{
+    pub fn new(items:Vec<slot_cheevos::Achievement>,note:Option<String>)->Self{Self{items,note,row:0}}
+    fn pages(&self)->usize{self.items.len().div_ceil(ACH_ROWS).max(1)}
+    /// The first row of the next (or previous) page, the pages going round.
+    fn turned(&self,forward:bool)->usize{
+        let pages=self.pages();
+        let to=(self.row/ACH_ROWS+if forward{1}else{pages-1})%pages;
+        (to*ACH_ROWS).min(self.items.len().saturating_sub(1))
+    }
+    /// True once it is to close.
+    fn input(&mut self,a:Action)->bool{
+        let last=self.items.len().saturating_sub(1);
+        match a{
+            Action::GbaDown(Btn::B)|Action::QuickMenu=>return true,
+            Action::GbaDown(Btn::Up)=>self.row=self.row.saturating_sub(1),
+            Action::GbaDown(Btn::Down)=>self.row=(self.row+1).min(last),
+            Action::GbaDown(Btn::L1)|Action::GbaDown(Btn::Left)=>self.row=self.turned(false),
+            Action::GbaDown(Btn::R1)|Action::GbaDown(Btn::Right)=>self.row=self.turned(true),
+            _=>{}
+        }
+        false
+    }
+    fn render(&self)->UndoFace{
+        let mut p=Painter::new();
+        p.text("ACHIEVEMENTS",32,24,576,30.0);
+        if self.items.is_empty(){
+            p.text("No achievements loaded",32,120,576,26.0);
+            let why=self.note.clone().unwrap_or_default();
+            for (i,line) in wrap(&why,576,18.0).iter().enumerate().take(6){p.text(line,32,168+i*28,576,18.0);}
+            p.text("B  back",32,440,576,16.0);
+            return UndoFace{rgba:p.rgba,w:640,h:480};
+        }
+        let done=self.items.iter().filter(|a|a.unlocked).count();
+        let got:u32=self.items.iter().filter(|a|a.unlocked).map(|a|a.points).sum();
+        let all:u32=self.items.iter().map(|a|a.points).sum();
+        p.text(&format!("{done} of {} done    {got} of {all} pts",self.items.len()),32,62,576,18.0);
+        if let Some(note)=&self.note{p.text(note,32,86,576,16.0);}
+        let first=self.row/ACH_ROWS*ACH_ROWS;
+        for (i,a) in self.items.iter().enumerate().skip(first).take(ACH_ROWS){
+            let y=116+(i-first)*40;
+            if i==self.row{p.rect(0,y,640,38,slot_ui::edge());}
+            let line=format!("{}  {}   {} pts",if a.unlocked{"[x]"}else{"[ ]"},a.title,a.points);
+            let w=slot_ui::text::label_font().map(|f|slot_ui::text::line_width(f,&line,22.0,0.0).ceil() as usize).unwrap_or(576).clamp(1,576);
+            p.text(&line,32,y+4,w,22.0);
+        }
+        if let Some(a)=self.items.get(self.row){
+            for (i,line) in wrap(&a.description,576,18.0).iter().enumerate().take(2){p.text(line,32,364+i*26,576,18.0);}
+        }
+        p.text(&format!("Page {} of {}     L1 / R1  page     B  back",first/ACH_ROWS+1,self.pages()),32,440,576,16.0);
+        UndoFace{rgba:p.rgba,w:640,h:480}
+    }
 }
 struct Painter{rgba:Vec<u8>}
 impl Painter{
@@ -749,7 +814,7 @@ impl Painter{
         assert_eq!(masked(&k),"Benni");
     }
     #[test]fn ra_screen_types_the_login_and_needs_both_fields(){
-        let mut m=WifiMenu{worker:None,face:None,dirty:true,on:true,status:String::new(),networks:Vec::new(),row:0,keyboard:None,refreshed:Instant::now(),art:None,fetched:Vec::new(),list:None,ra:Some(RaScreen{account:None,user:String::new(),password:String::new(),job:None,test:None}),query:None,update:None};
+        let mut m=WifiMenu{worker:None,face:None,dirty:true,on:true,status:String::new(),networks:Vec::new(),row:0,keyboard:None,refreshed:Instant::now(),art:None,fetched:Vec::new(),list:None,ra:Some(RaScreen{account:None,user:String::new(),password:String::new(),job:None,test:None}),query:None,update:None,cheevos:None};
         m.input(Action::GbaDown(Btn::A));assert!(m.keyboard.as_ref().is_some_and(|k|!k.secret));
         // q w e on the letter row
         m.input(Action::GbaDown(Btn::Down));for _ in 0..3{m.input(Action::GbaDown(Btn::A));m.input(Action::GbaDown(Btn::Right));}
@@ -767,7 +832,7 @@ impl Painter{
         assert_eq!(cached_badge(&dir),Some(dir.join("System/Cache/Badges/a.png")));
         assert_eq!(cached_badge(&dir.join("nowhere")),None);let _=fs::remove_dir_all(&dir);
         let account=ra::Account{user:"Benni".into(),token:"t".into()};
-        let mut m=WifiMenu{worker:None,face:None,dirty:true,on:true,status:String::new(),networks:Vec::new(),row:0,keyboard:None,refreshed:Instant::now(),art:None,fetched:Vec::new(),list:None,ra:Some(RaScreen{account:Some(account),user:String::new(),password:String::new(),job:None,test:None}),query:None,update:None};
+        let mut m=WifiMenu{worker:None,face:None,dirty:true,on:true,status:String::new(),networks:Vec::new(),row:0,keyboard:None,refreshed:Instant::now(),art:None,fetched:Vec::new(),list:None,ra:Some(RaScreen{account:Some(account),user:String::new(),password:String::new(),job:None,test:None}),query:None,update:None,cheevos:None};
         m.input(Action::GbaDown(Btn::Up));assert_eq!(m.row,3,"four rows when logged in, wrapping to LOG OUT");
         m.input(Action::GbaDown(Btn::Up));assert_eq!(m.row,2);
         assert!(m.take_test_unlock().is_none());
@@ -788,7 +853,7 @@ impl Painter{
     #[test]fn art_screen_deletes_only_after_a_second_a(){
         let d=tempfile::tempdir().unwrap();let label=d.path().join("Emerald.png");fs::write(&label,b"png").unwrap();
         let games=vec![(Platform::Gba,"Emerald".to_string(),label.clone(),false),(Platform::Gb,"Tetris".to_string(),d.path().join("Tetris.png"),false)];
-        let mut m=WifiMenu{worker:None,face:None,dirty:true,on:true,status:String::new(),networks:Vec::new(),row:0,keyboard:None,refreshed:Instant::now(),art:None,fetched:Vec::new(),list:Some(ArtList{games,armed:None}),ra:None,query:None,update:None};
+        let mut m=WifiMenu{worker:None,face:None,dirty:true,on:true,status:String::new(),networks:Vec::new(),row:0,keyboard:None,refreshed:Instant::now(),art:None,fetched:Vec::new(),list:Some(ArtList{games,armed:None}),ra:None,query:None,update:None,cheevos:None};
         m.input(Action::GbaDown(Btn::Down));m.input(Action::GbaDown(Btn::A));
         assert!(label.exists(),"first A only asks");
         if let Ok(path)=std::env::var("SLOT_ART_PREVIEW"){let f=m.render();let mut e=png::Encoder::new(fs::File::create(path).unwrap(),640,480);e.set_color(png::ColorType::Rgba);e.set_depth(png::BitDepth::Eight);e.write_header().unwrap().write_image_data(&f.rgba).unwrap();}
@@ -798,7 +863,7 @@ impl Painter{
         assert_eq!(m.list.as_ref().unwrap().games.len(),1);
         assert!(m.input(Action::GbaDown(Btn::B)),"B closes once nothing is armed");
     }
-    #[test]fn render_fixture(){let s=WifiMenu{worker:None,face:None,dirty:true,on:true,status:"Password is case sensitive".into(),networks:Vec::new(),row:0,keyboard:Some(Keyboard{target:KeyTarget::Wifi(network()),secret:true,password:"Test".into(),key:0,page:0,typed:Some(Instant::now())}),refreshed:Instant::now(),art:None,fetched:Vec::new(),list:None,ra:None,query:None,update:None};
+    #[test]fn render_fixture(){let s=WifiMenu{worker:None,face:None,dirty:true,on:true,status:"Password is case sensitive".into(),networks:Vec::new(),row:0,keyboard:Some(Keyboard{target:KeyTarget::Wifi(network()),secret:true,password:"Test".into(),key:0,page:0,typed:Some(Instant::now())}),refreshed:Instant::now(),art:None,fetched:Vec::new(),list:None,ra:None,query:None,update:None,cheevos:None};
         let mut s=s;
         // SLOT_WIFI_PREVIEW=<dir>: one picture per keyboard page.
         for page in 0..KEYS.len(){

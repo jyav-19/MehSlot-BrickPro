@@ -17,6 +17,17 @@ type HttpFn = unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char, *c
 type EventFn = unsafe extern "C" fn(*mut c_void, c_int, *const c_char, *const c_char, c_uint, *const c_char);
 type DoneFn = unsafe extern "C" fn(*mut c_void, c_int, c_int, *const c_char, *const c_char);
 type EachFn = unsafe extern "C" fn(*mut c_void, *const c_char);
+type AchievementFn = unsafe extern "C" fn(*mut c_void, c_uint, *const c_char, *const c_char, c_uint, c_int);
+
+/// One achievement of a game: whether it is unlocked is as of when the list was read.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Achievement {
+    pub id: u32,
+    pub title: String,
+    pub description: String,
+    pub points: u32,
+    pub unlocked: bool,
+}
 type MemoryFn = unsafe extern "C" fn(*mut c_void, c_uint, *mut *mut u8, *mut usize);
 
 extern "C" {
@@ -31,6 +42,7 @@ extern "C" {
     fn slot_cheevos_reset(s: *mut Raw);
     fn slot_cheevos_unload(s: *mut Raw);
     fn slot_cheevos_badges(s: *mut Raw, each: EachFn, ctx: *mut c_void) -> c_uint;
+    fn slot_cheevos_achievements(s: *mut Raw, each: AchievementFn, ctx: *mut c_void) -> c_uint;
     fn slot_cheevos_version() -> *const c_char;
     fn slot_cheevos_console_gba() -> c_uint;
     fn slot_cheevos_console_gb() -> c_uint;
@@ -301,6 +313,34 @@ impl Cheevos {
         let mut urls = Vec::new();
         unsafe { slot_cheevos_badges(self.raw, each, &mut urls as *mut Vec<String> as *mut c_void) };
         urls
+    }
+
+    /// The loaded game's core achievements in the order the set lists them, each with whether it
+    /// is unlocked. Empty until a game has loaded.
+    pub fn achievements(&self) -> Vec<Achievement> {
+        unsafe extern "C" fn each(
+            ctx: *mut c_void,
+            id: c_uint,
+            title: *const c_char,
+            description: *const c_char,
+            points: c_uint,
+            unlocked: c_int,
+        ) {
+            let list = &mut *(ctx as *mut Vec<Achievement>);
+            list.push(Achievement {
+                id,
+                title: text(title),
+                description: text(description),
+                points,
+                unlocked: unlocked != 0,
+            });
+        }
+        let mut list: Vec<Achievement> = Vec::new();
+        unsafe {
+            slot_cheevos_achievements(self.raw, each, &mut list as *mut Vec<Achievement> as *mut c_void);
+        }
+        list.sort_by_key(|a| a.id);
+        list
     }
 
     pub fn take(&self) -> Vec<Notice> {

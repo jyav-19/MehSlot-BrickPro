@@ -19,6 +19,9 @@ typedef void (*slot_event_fn)(void* host, int kind, const char* title, const cha
                               unsigned points, const char* badge);
 typedef void (*slot_done_fn)(void* host, int op, int ok, const char* message, const char* badge);
 typedef void (*slot_each_fn)(void* ctx, const char* url);
+/* One achievement of the loaded game: its id, title, description, points, and whether it is unlocked. */
+typedef void (*slot_achievement_fn)(void* ctx, unsigned id, const char* title, const char* description,
+                                    unsigned points, int unlocked);
 typedef void (*slot_memory_fn)(void* host, unsigned id, unsigned char** data, size_t* size);
 
 enum { SLOT_OP_LOGIN = 1, SLOT_OP_GAME = 2 };
@@ -256,6 +259,25 @@ unsigned slot_cheevos_badges(slot_cheevos* s, slot_each_fn each, void* ctx) {
         each(ctx, badge);
         n++;
       }
+    }
+  }
+  rc_client_destroy_achievement_list(list);
+  return n;
+}
+
+/* Every core achievement of the loaded game, one call each, for the achievements screen. */
+unsigned slot_cheevos_achievements(slot_cheevos* s, slot_achievement_fn each, void* ctx) {
+  unsigned n = 0, b, a;
+  rc_client_achievement_list_t* list = rc_client_create_achievement_list(
+      s->client, RC_CLIENT_ACHIEVEMENT_CATEGORY_CORE, RC_CLIENT_ACHIEVEMENT_LIST_GROUPING_LOCK_STATE);
+  if (!list)
+    return 0;
+  for (b = 0; b < list->num_buckets; b++) {
+    for (a = 0; a < list->buckets[b].num_achievements; a++) {
+      const rc_client_achievement_t* x = list->buckets[b].achievements[a];
+      each(ctx, x->id, x->title ? x->title : "", x->description ? x->description : "", x->points,
+           x->unlocked != 0);
+      n++;
     }
   }
   rc_client_destroy_achievement_list(list);

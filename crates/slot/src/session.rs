@@ -32,6 +32,9 @@ pub struct Session {
     rewinding: bool,
     fast: bool,
     motor: u16,
+    /// When the achievements are next kept on the card, and the list last kept.
+    achievements_at: Millis,
+    kept: Vec<slot_cheevos::Achievement>,
     /// When the buzz asked for by the Fn switch is over.
     buzz_until: Millis,
     pulse: Option<(Millis, u16)>,
@@ -74,6 +77,8 @@ impl Session {
             rewinding: false,
             fast: false,
             motor: 0,
+            achievements_at: 0,
+            kept: Vec::new(),
             buzz_until: 0,
             pulse: None,
             reloading: false,
@@ -193,6 +198,7 @@ impl Session {
         for action in actions {
             self.act(action);
         }
+        self.sync_achievements();
         self.sync_pad();
     }
 
@@ -360,6 +366,28 @@ impl Session {
 
     pub fn prefetching(&self) -> Option<&std::path::Path> {
         self.prefetch.reading()
+    }
+
+    /// The pause menu asked for the achievements: the list the emulator thread last read goes to
+    /// the app. And every so often that list is kept on the card, to read without a connection.
+    fn sync_achievements(&mut self) {
+        if self.app.take_achievements_request() {
+            let list = self.emu.as_ref().map(|emu| emu.achievement_list()).unwrap_or_default();
+            self.app.open_achievements(list);
+        }
+        let now = self.app.now();
+        if now < self.achievements_at {
+            return;
+        }
+        self.achievements_at = now + 15_000;
+        let (Some(emu), Some(key)) = (&self.emu, self.app.achievement_key()) else {
+            return;
+        };
+        let list = emu.achievement_list();
+        if !list.is_empty() && list != self.kept {
+            crate::achievements::save(&self.root, &key, &list);
+            self.kept = list;
+        }
     }
 
     fn sync_rumble(&mut self) {

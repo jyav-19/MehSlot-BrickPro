@@ -119,6 +119,8 @@ struct Shared {
     cheevos_notices: Mutex<Vec<slot_cheevos::Notice>>,
     /// The loaded game's badge URLs, to fetch before any unlock needs one.
     cheevos_badges: Mutex<Vec<String>>,
+    /// The game's achievements as the emulator thread last read them, for the achievements screen.
+    cheevos_list: Mutex<Vec<slot_cheevos::Achievement>>,
 }
 
 #[derive(Default)]
@@ -207,6 +209,7 @@ impl EmuHandle {
             cheevos_login: Mutex::new(None),
             cheevos_notices: Mutex::new(Vec::new()),
             cheevos_badges: Mutex::new(Vec::new()),
+            cheevos_list: Mutex::new(Vec::new()),
         });
         let (tx, rx) = channel();
         let worker = Worker {
@@ -252,6 +255,11 @@ impl EmuHandle {
 
     pub fn take_achievement_notices(&self) -> Vec<slot_cheevos::Notice> {
         std::mem::take(&mut *self.shared.cheevos_notices.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    /// The game's achievements as the emulator thread last read them.
+    pub fn achievement_list(&self) -> Vec<slot_cheevos::Achievement> {
+        self.shared.cheevos_list.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn net(&self) -> &Link {
@@ -652,6 +660,21 @@ impl Worker {
                 let said = c.take();
                 if said.iter().any(|n| matches!(n, slot_cheevos::Notice::GameLoaded(Ok(_)))) {
                     *self.shared.cheevos_badges.lock().unwrap_or_else(|e| e.into_inner()) = c.badge_urls();
+                }
+                // The list for the achievements screen: read as the game loads and as one is
+                // unlocked, that one marked done here in case rcheevos has not caught up.
+                if said.iter().any(|n| {
+                    matches!(n, slot_cheevos::Notice::GameLoaded(Ok(_)) | slot_cheevos::Notice::Unlocked { .. })
+                }) {
+                    let mut list = c.achievements();
+                    for n in &said {
+                        if let slot_cheevos::Notice::Unlocked { title, .. } = n {
+                            for a in list.iter_mut().filter(|a| a.title == *title) {
+                                a.unlocked = true;
+                            }
+                        }
+                    }
+                    *self.shared.cheevos_list.lock().unwrap_or_else(|e| e.into_inner()) = list;
                 }
                 if !said.is_empty() {
                     self.shared.cheevos_notices.lock().unwrap_or_else(|e| e.into_inner()).extend(said);

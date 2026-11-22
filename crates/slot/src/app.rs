@@ -313,6 +313,8 @@ pub struct App {
     power_menu: Option<usize>,
     power_menu_faces: Vec<(TexId, u32, u32)>,
     pause_menu: Option<usize>,
+    /// The pause menu asked for the achievements list; the session hands it over.
+    achievements_wanted: bool,
     pause_menu_faces: Vec<(TexId, u32, u32)>,
     /// Slot OS: no stock OS to exit to, so holding Power shuts down without asking.
     power_off_only: bool,
@@ -609,6 +611,7 @@ impl App {
             power_menu: None,
             power_menu_faces: Vec::new(),
             pause_menu: None,
+            achievements_wanted: false,
             pause_menu_faces: Vec::new(),
             power_off_only: slot_power::slot_os(),
             core_picker: None,
@@ -4801,6 +4804,45 @@ impl App {
         }
     }
 
+    /// The pause menu asked for the achievements list: true once.
+    pub fn take_achievements_request(&mut self) -> bool {
+        std::mem::take(&mut self.achievements_wanted)
+    }
+
+    /// The running game as the achievements kept for it are named: its console and name.
+    pub fn achievement_key(&self) -> Option<String> {
+        match &self.phase {
+            Phase::Playing { cart } => Some(format!("{:?}-{}", self.platform, cart)),
+            _ => None,
+        }
+    }
+
+    /// The achievements screen, over the pause menu: the list the emulator thread read or, when
+    /// there is none (no connection as the game started), the one kept for this game.
+    pub fn open_achievements(&mut self, live: Vec<slot_cheevos::Achievement>) {
+        #[cfg(feature = "brick")]
+        {
+            let saved = match (self.root.as_deref(), self.achievement_key()) {
+                (Some(root), Some(key)) if live.is_empty() => crate::achievements::load(root, &key),
+                _ => None,
+            };
+            let (items, note) = match saved {
+                _ if !live.is_empty() => (live, None),
+                Some(saved) => {
+                    let note = format!("Offline: the list as saved {}", crate::achievements::ago(saved.saved_at));
+                    (saved.items, Some(note))
+                }
+                None => (
+                    Vec::new(),
+                    Some("Sign in under Online > Achievements, then start the game with Wi-Fi on. A game with no achievements has none to show.".to_string()),
+                ),
+            };
+            self.wifi = Some(crate::brick_wifi::WifiMenu::achievement_list(items, note));
+        }
+        #[cfg(not(feature = "brick"))]
+        let _ = live;
+    }
+
     fn open_pause_menu(&mut self) {
         if self.link_active() {
             return self.refuse();
@@ -4834,6 +4876,7 @@ impl App {
                     self.save_state();
                 }
                 PauseChoice::LoadState => self.leave_paused(Self::open_polaroids),
+                PauseChoice::Achievements => self.achievements_wanted = true,
                 PauseChoice::Reset => {
                     self.pause_menu = None;
                     if let Some(snapshot) = &self.snapshot {
